@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { AgentSummary, CatalogModel } from "../lib/types";
-import { XIcon } from "./Icons";
+import { XIcon, SlidersIcon, ShieldIcon } from "./Icons";
 
 interface EditModelPolicyModalProps {
   agent: AgentSummary;
@@ -15,10 +15,10 @@ export function EditModelPolicyModal({
   onClose,
   onSuccess,
 }: EditModelPolicyModalProps) {
-  const [provider, setProvider] = useState("openai");
-  const [preferredModel, setPreferredModel] = useState(agent.preferred_model || "gpt-4o-mini");
+  const [provider, setProvider] = useState("test");
+  const [preferredModel, setPreferredModel] = useState(agent.preferred_model || "premium");
   const [fallbackModel, setFallbackModel] = useState(
-    agent.fallback_models?.[0] || agent.preferred_model || "gpt-4o-mini",
+    agent.fallback_models?.[0] || agent.preferred_model || "cheap",
   );
   const [allowFallback, setAllowFallback] = useState(agent.substitution_enabled);
 
@@ -33,7 +33,9 @@ export function EditModelPolicyModal({
         if (Array.isArray(data) && data.length > 0) {
           setModels(data);
           const found = data.find((m) => m.model === agent.preferred_model);
-          if (found) setProvider(found.provider);
+          if (found) {
+            setProvider(found.provider);
+          }
         }
       })
       .catch(() => {});
@@ -72,17 +74,31 @@ export function EditModelPolicyModal({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-content">
-        <div className="modal-header">
-          <div className="modal-title">Model Policy &bull; {agent.agent_id}</div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
-            <XIcon size={14} />
+      <div className="modal-content" style={{ padding: 24, maxWidth: 540 }}>
+        {/* Modal Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+                Model Policy &amp; Degradation
+              </h3>
+              <span className="badge badge-neutral font-mono" style={{ fontSize: 11 }}>
+                {agent.agent_id}
+              </span>
+            </div>
+            <p style={{ color: "var(--text-secondary)", fontSize: 12.5, marginTop: 4 }}>
+              Configure model substitution and economy fallback policies under budget pressure.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onClose}
+            style={{ padding: 4, marginTop: -2 }}
+          >
+            <XIcon size={16} />
           </button>
         </div>
-
-        <p style={{ color: "var(--text-secondary)", fontSize: 12.5, marginBottom: 16 }}>
-          Configure model substitution and economy fallback policies under budget pressure.
-        </p>
 
         {error && (
           <div className="notice-box danger" style={{ marginBottom: 14 }}>
@@ -90,34 +106,40 @@ export function EditModelPolicyModal({
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label className="form-label">Provider</label>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Provider Select */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+              Provider
+            </label>
             <select
-              className="input mono"
+              className="form-select font-mono"
               value={provider}
               onChange={(e) => {
-                setProvider(e.target.value);
-                const provM = models.filter((m) => m.provider.toLowerCase() === e.target.value.toLowerCase());
-                const first = provM[0];
-                if (first) {
-                  setPreferredModel(first.model);
-                  setFallbackModel(first.model);
+                const newProv = e.target.value;
+                setProvider(newProv);
+                const provM = models.filter((m) => m.provider.toLowerCase() === newProv.toLowerCase());
+                if (provM.length > 0) {
+                  setPreferredModel(provM[0]?.model || "");
+                  setFallbackModel(provM[provM.length > 1 ? 1 : 0]?.model || provM[0]?.model || "");
                 }
               }}
             >
-              <option value="bedrock">Amazon Bedrock</option>
+              <option value="test">Test Provider (Deterministic Doubles)</option>
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
-              <option value="test">Test Provider</option>
+              <option value="bedrock">Amazon Bedrock</option>
             </select>
           </div>
 
+          {/* Preferred vs Fallback Model */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div className="form-group">
-              <label className="form-label">Preferred Model</label>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                Preferred Model
+              </label>
               <select
-                className="input mono"
+                className="form-select font-mono"
                 value={preferredModel}
                 onChange={(e) => setPreferredModel(e.target.value)}
               >
@@ -129,10 +151,12 @@ export function EditModelPolicyModal({
               </select>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Fallback (Economy)</label>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                Fallback (Economy)
+              </label>
               <select
-                className="input mono"
+                className="form-select font-mono"
                 value={fallbackModel}
                 onChange={(e) => setFallbackModel(e.target.value)}
               >
@@ -145,36 +169,56 @@ export function EditModelPolicyModal({
             </div>
           </div>
 
+          {/* Automatic Substitution Checkbox Card */}
           <div
             style={{
-              padding: "10px 12px",
-              background: "var(--surface-inset)",
+              padding: "12px 14px",
+              backgroundColor: allowFallback ? "var(--brand-blue-soft)" : "var(--bg-app)",
               borderRadius: "var(--radius-md)",
-              border: "1px solid var(--border-subtle)",
-              marginTop: 10,
+              border: allowFallback ? "1px solid var(--brand-blue-border)" : "1px solid var(--border-app)",
               display: "flex",
               alignItems: "flex-start",
               gap: 10,
+              cursor: "pointer",
+              transition: "all 0.15s ease",
             }}
+            onClick={() => setAllowFallback(!allowFallback)}
           >
             <input
               type="checkbox"
               id="allowFallback"
               checked={allowFallback}
               onChange={(e) => setAllowFallback(e.target.checked)}
-              style={{ marginTop: 2 }}
+              style={{ marginTop: 2, accentColor: "var(--primary)", cursor: "pointer" }}
+              onClick={(e) => e.stopPropagation()}
             />
-            <label htmlFor="allowFallback" style={{ cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}>
-              Enable automatic model substitution under budget pressure (routes to cheaper verified fallback instead of blocking immediately).
+            <label
+              htmlFor="allowFallback"
+              style={{ cursor: "pointer", fontSize: 12.5, color: "var(--text-primary)", lineHeight: 1.4 }}
+            >
+              <strong>Enable automatic model substitution under budget pressure</strong>
+              <div style={{ color: "var(--text-secondary)", fontSize: 11.5, marginTop: 2 }}>
+                Routes to cheaper verified fallback candidate instead of returning an immediate HTTP 429 block when preferred model exceeds available funds.
+              </div>
             </label>
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn" onClick={onClose} disabled={loading}>
+          {/* Modal Footer */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={onClose}
+              disabled={loading}
+            >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? "Saving..." : "Save Policy"}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              {loading ? "Saving Policy..." : "Save Policy"}
             </button>
           </div>
         </form>

@@ -1,7 +1,8 @@
 "use client";
 
+import React from "react";
 import type { PlaygroundLifecycleStep } from "../lib/types";
-import { CheckCircleIcon, XIcon } from "./Icons";
+import { CheckCircleIcon, XIcon, ShieldIcon, ActivityIcon } from "./Icons";
 
 interface LifecycleStepperProps {
   steps: PlaygroundLifecycleStep[];
@@ -12,28 +13,33 @@ export function LifecycleStepper({ steps }: LifecycleStepperProps) {
 
   return (
     <div>
-      <div className="section-header" style={{ marginBottom: 14 }}>
-        <span className="section-title">10-Stage Authorization &amp; Settlement Trace</span>
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-          Pre-Inference Gateways &bull; Provider Dispatch &bull; Settlement
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ShieldIcon size={16} className="text-primary" />
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)" }}>
+            10-Stage Financial Authorization &amp; Settlement Trace
+          </span>
+        </div>
+        <span className="badge badge-neutral" style={{ fontSize: 11 }}>
+          Pre-Inference Firewall
         </span>
       </div>
 
-      <div style={{ position: "relative", paddingLeft: 8 }}>
+      <div style={{ position: "relative", paddingLeft: 12 }}>
         {/* Continuous Left Vertical Guide Line */}
         <div
           style={{
             position: "absolute",
             top: 14,
             bottom: 14,
-            left: 17,
-            width: 1,
-            background: "var(--border)",
+            left: 21,
+            width: 2,
+            backgroundColor: "var(--border-app)",
             zIndex: 0,
           }}
         />
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, position: "relative", zIndex: 1 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative", zIndex: 1 }}>
           {steps.map((step) => {
             const isCompleted = step.status === "completed";
             const isBlocked = step.status === "blocked";
@@ -46,17 +52,19 @@ export function LifecycleStepper({ steps }: LifecycleStepperProps) {
                   display: "flex",
                   alignItems: "flex-start",
                   gap: 12,
-                  padding: "8px 12px",
-                  background: isBlocked
-                    ? "var(--danger-subtle)"
+                  padding: "10px 14px",
+                  backgroundColor: isBlocked
+                    ? "var(--danger-soft)"
                     : isCompleted
-                    ? "var(--surface-raised)"
-                    : "var(--surface-inset)",
+                    ? "#ffffff"
+                    : "var(--bg-app)",
                   border: isBlocked
                     ? "1px solid var(--danger-border)"
-                    : "1px solid var(--border-subtle)",
-                  borderRadius: "var(--radius-md)",
+                    : "1px solid var(--border-app)",
+                  borderRadius: "var(--radius-lg)",
                   fontSize: 12.5,
+                  boxShadow: "var(--shadow-sm)",
+                  transition: "all 0.15s ease",
                 }}
               >
                 {/* Node circle */}
@@ -64,23 +72,22 @@ export function LifecycleStepper({ steps }: LifecycleStepperProps) {
                   style={{
                     width: 20,
                     height: 20,
-                    borderRadius: "50%",
+                    borderRadius: "9999px",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     fontSize: 10,
-                    fontWeight: 600,
+                    fontWeight: 700,
                     flexShrink: 0,
                     marginTop: 1,
-                    background: isBlocked
+                    backgroundColor: isBlocked
                       ? "var(--danger)"
                       : isCompleted
                       ? "var(--ok)"
                       : isRunning
-                      ? "var(--info)"
-                      : "var(--surface)",
+                      ? "var(--brand-blue)"
+                      : "var(--bg-muted)",
                     color: isBlocked || isCompleted || isRunning ? "#ffffff" : "var(--text-muted)",
-                    border: isCompleted || isBlocked || isRunning ? "none" : "1px solid var(--border)",
                   }}
                 >
                   {isCompleted ? (
@@ -94,23 +101,29 @@ export function LifecycleStepper({ steps }: LifecycleStepperProps) {
 
                 {/* Step content */}
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <div style={{ fontWeight: 600, color: isBlocked ? "var(--danger)" : "var(--text-primary)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        fontSize: 13,
+                        color: isBlocked ? "var(--danger)" : "var(--text-primary)",
+                      }}
+                    >
                       Stage {step.step_number}: {step.name}
                     </div>
                     <span
                       className={`badge ${
                         isBlocked
-                          ? "danger"
+                          ? "badge-danger"
                           : isCompleted
-                          ? "ok"
+                          ? "badge-ok"
                           : isRunning
-                          ? "info"
-                          : "muted"
+                          ? "badge-cyan"
+                          : "badge-neutral"
                       }`}
-                      style={{ fontSize: 10, padding: "1px 5px" }}
+                      style={{ fontSize: 10.5, textTransform: "uppercase" }}
                     >
-                      {step.status.toUpperCase()}
+                      {step.status}
                     </span>
                   </div>
 
@@ -122,10 +135,10 @@ export function LifecycleStepper({ steps }: LifecycleStepperProps) {
                     <div
                       style={{
                         marginTop: 6,
-                        padding: "4px 8px",
-                        background: "var(--surface-inset)",
+                        padding: "5px 8px",
+                        backgroundColor: "var(--bg-app)",
                         borderRadius: "var(--radius-sm)",
-                        border: "1px solid var(--border-subtle)",
+                        border: "1px solid var(--border-app)",
                         display: "flex",
                         flexWrap: "wrap",
                         gap: 10,
@@ -137,7 +150,7 @@ export function LifecycleStepper({ steps }: LifecycleStepperProps) {
                       {Object.entries(step.details).map(([k, v]) => (
                         <span key={k}>
                           <span style={{ color: "var(--text-muted)" }}>{k}:</span>{" "}
-                          <span style={{ color: "var(--text-primary)" }}>{String(v)}</span>
+                          <strong style={{ color: "var(--text-primary)" }}>{String(v)}</strong>
                         </span>
                       ))}
                     </div>

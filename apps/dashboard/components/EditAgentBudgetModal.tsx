@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { AgentSummary } from "../lib/types";
-import { XIcon } from "./Icons";
+import { XIcon, SlidersIcon, ShieldIcon } from "./Icons";
 
 interface EditAgentBudgetModalProps {
   agent: AgentSummary;
@@ -15,8 +15,17 @@ export function EditAgentBudgetModal({
   onClose,
   onSuccess,
 }: EditAgentBudgetModalProps) {
+  const initialWindow =
+    agent.window_type === "MONTH" || agent.window_type === "MONTHLY"
+      ? "MONTHLY"
+      : agent.window_type === "WEEK" || agent.window_type === "WEEKLY"
+      ? "WEEKLY"
+      : agent.window_type === "DAY" || agent.window_type === "DAILY"
+      ? "DAILY"
+      : "MONTHLY";
+
   const [amountUsd, setAmountUsd] = useState(agent.limit_usd);
-  const [window, setWindow] = useState(agent.window_type || "MONTHLY");
+  const [window, setWindow] = useState(initialWindow);
   const [warningPercent, setWarningPercent] = useState(80);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,18 +39,25 @@ export function EditAgentBudgetModal({
     setLoading(true);
     setError(null);
     try {
+      const normalizedWindow =
+        window === "MONTH" || window === "MONTHLY"
+          ? "MONTHLY"
+          : window === "WEEK" || window === "WEEKLY"
+          ? "WEEKLY"
+          : "DAILY";
+
       const res = await fetch(`/api/agents/${encodeURIComponent(agent.agent_id)}/budget`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount_usd: amountUsd,
-          window,
+          window: normalizedWindow,
           warning_percent: Number(warningPercent),
         }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to update agent budget");
+        throw new Error(data.error || data.detail || "Failed to update agent budget");
       }
       onSuccess();
     } catch (err: any) {
@@ -53,17 +69,26 @@ export function EditAgentBudgetModal({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-content">
-        <div className="modal-header">
-          <div className="modal-title">Edit Agent Budget &bull; {agent.agent_id}</div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
-            <XIcon size={14} />
+      <div className="modal-content" style={{ padding: 24 }}>
+        {/* Modal Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+              Edit Agent Budget &bull; <code className="font-mono">{agent.agent_id}</code>
+            </h3>
+            <p style={{ color: "var(--text-secondary)", fontSize: 12.5, marginTop: 2 }}>
+              Adjust the periodic ceiling. Invariants are evaluated atomically.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onClose}
+            style={{ padding: 6 }}
+          >
+            <XIcon size={16} />
           </button>
         </div>
-
-        <p style={{ color: "var(--text-secondary)", fontSize: 12.5, marginBottom: 16 }}>
-          Adjust the periodic spend limit for this agent. Financial invariants are calculated atomically.
-        </p>
 
         {error && (
           <div className="notice-box danger" style={{ marginBottom: 14 }}>
@@ -71,23 +96,27 @@ export function EditAgentBudgetModal({
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div className="form-group">
-              <label className="form-label">New Limit (USD)</label>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                New Budget Cap (USD)
+              </label>
               <input
                 type="text"
-                className="input mono"
+                className="form-input font-mono"
                 value={amountUsd}
                 onChange={(e) => setAmountUsd(e.target.value)}
                 required
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Window</label>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                Reset Window
+              </label>
               <select
-                className="input mono"
+                className="form-select font-mono"
                 value={window}
                 onChange={(e) => setWindow(e.target.value)}
               >
@@ -98,11 +127,13 @@ export function EditAgentBudgetModal({
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Warning Threshold (%)</label>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+              Warning Alert Threshold (%)
+            </label>
             <input
               type="number"
-              className="input mono"
+              className="form-input font-mono"
               min={1}
               max={99}
               value={warningPercent}
@@ -112,25 +143,41 @@ export function EditAgentBudgetModal({
 
           <div
             style={{
-              padding: "8px 12px",
-              background: "var(--surface-inset)",
-              borderRadius: "var(--radius-sm)",
-              border: "1px solid var(--border-subtle)",
+              padding: "10px 12px",
+              backgroundColor: "var(--bg-app)",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--border-app)",
               fontSize: 12,
               color: "var(--text-secondary)",
-              marginTop: 10,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
             }}
           >
-            <strong>Adjustment:</strong> ${agent.limit_usd} &rarr; ${amountUsd} (
-            {pctChange >= 0 ? `+${pctChange}%` : `${pctChange}%`})
+            <span>
+              <strong>Adjustment:</strong> ${agent.limit_usd} &rarr; ${amountUsd}
+            </span>
+            <span className={`badge ${pctChange > 0 ? "badge-indigo" : pctChange < 0 ? "badge-warning" : "badge-neutral"}`}>
+              {pctChange >= 0 ? `+${pctChange}%` : `${pctChange}%`}
+            </span>
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn" onClick={onClose} disabled={loading}>
+          {/* Modal Footer */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={onClose}
+              disabled={loading}
+            >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? "Saving..." : "Save Changes"}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              {loading ? "Saving Changes..." : "Save Changes"}
             </button>
           </div>
         </form>

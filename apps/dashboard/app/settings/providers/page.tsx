@@ -3,6 +3,7 @@ import { ProviderCard } from "../../../components/ProviderCard";
 import { SetupWizard } from "../../../components/SetupWizard";
 import { getCatalogModels, getProviders, getReadiness } from "../../../lib/api";
 import type { CatalogModel, ProviderConfig, Readiness } from "../../../lib/types";
+import { SettingsIcon, CheckCircleIcon, AlertCircleIcon, ShieldIcon } from "../../../components/Icons";
 
 export const dynamic = "force-dynamic";
 
@@ -38,27 +39,37 @@ export default async function ProvidersSettingsPage() {
   const hasProductionProvider = productionProviders.length > 0;
 
   return (
-    <main>
-      <div className="page-header">
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Header */}
+      <div className="page-header" style={{ marginBottom: 0 }}>
         <div>
-          <h1 className="page-title">Provider Configuration &amp; Price Catalog</h1>
+          <h1 className="page-title">Provider Adapters &amp; Model Pricing Catalog</h1>
           <p className="page-description">
-            Configure, test, and govern real LLM providers (Amazon Bedrock, OpenAI, Anthropic) and deterministic test doubles.
+            Configure, test, and govern real LLM providers (Amazon Bedrock, OpenAI, Anthropic) and deterministic test doubles against pinned pricing.
           </p>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="badge badge-indigo" style={{ fontSize: 12, padding: "4px 10px" }}>
+            <ShieldIcon size={13} />
+            <span>Catalog: {readiness?.detail?.catalog_version || "2026-08-19.1"}</span>
+          </span>
         </div>
       </div>
 
       {error && (
-        <div className="notice-box danger" style={{ marginBottom: 16 }}>
-          Failed to load provider configuration: {error}
+        <div className="notice-box danger">
+          <AlertCircleIcon size={16} />
+          <span>Failed to load provider configuration: {error}</span>
         </div>
       )}
 
       {/* Production Provider Warning Banner */}
       {!hasProductionProvider && (
-        <div className="notice-box warning" style={{ marginBottom: 20 }}>
+        <div className="notice-box warning">
+          <AlertCircleIcon size={16} />
           <div>
-            <strong style={{ color: "var(--warn)" }}>No Production Provider Configured:</strong> The gateway is running with only the local test double active. Connect Amazon Bedrock (via IAM) or OpenAI / Anthropic (via API Key) to route real workloads.
+            <strong>Development Test Double Active:</strong> The gateway is currently operating with the deterministic local test double. Connect Amazon Bedrock (via IAM) or OpenAI / Anthropic (via API Key) below to route production inference.
           </div>
         </div>
       )}
@@ -72,11 +83,19 @@ export default async function ProvidersSettingsPage() {
       )}
 
       {/* Supported Providers Grid */}
-      <div style={{ marginBottom: 32 }}>
-        <div className="section-header">
-          <span className="section-title">Supported Providers ({providers.length})</span>
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+              Provider Adapters ({providers.length})
+            </h2>
+            <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
+              Active inference endpoints, authentication modes, and credentials
+            </p>
+          </div>
         </div>
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
           {providers.map((p) => (
             <ProviderCard
               key={p.provider}
@@ -88,18 +107,18 @@ export default async function ProvidersSettingsPage() {
       </div>
 
       {/* Pricing & Model Catalog Section */}
-      <div style={{ marginTop: 36 }}>
-        <div className="section-header">
-          <span className="section-title">Pricing &amp; Model Catalog</span>
-          <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
-            Catalog Version: <code className="font-mono">{readiness?.detail?.catalog_version || "2026-08-19.1"}</code>
-          </span>
+      <div style={{ marginTop: 8 }}>
+        <div style={{ marginBottom: 14 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+            Deterministic Pricing &amp; Capability Catalog
+          </h2>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
+            Every inference request is pre-metered and financial limits are enforced strictly against these pinned rates.
+          </p>
         </div>
-        <div style={{ color: "var(--text-secondary)", fontSize: 12, marginBottom: 12 }}>
-          Every request is metered against these pinned rates. Models not present in this catalog are rejected before inference.
-        </div>
+
         <CatalogTable models={catalogModels} />
       </div>
-    </main>
+    </div>
   );
 }

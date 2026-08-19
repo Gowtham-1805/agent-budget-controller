@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { CatalogModel, ProviderConfig, ProviderTestResult } from "../lib/types";
+import { CheckCircleIcon, AlertCircleIcon, SettingsIcon, CpuIcon, ShieldIcon } from "./Icons";
 
 interface ProviderCardProps {
   initialConfig: ProviderConfig;
@@ -158,67 +159,68 @@ export function ProviderCard({
   const isTestProvider = config.provider === "test";
 
   return (
-    <div className="card" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div className="card-header">
+    <div className="shadcn-card" style={{ display: "flex", flexDirection: "column", height: "100%", padding: 20 }}>
+      {/* Header */}
+      <div className="card-header" style={{ marginBottom: 12 }}>
         <div>
-          <h3 style={{ fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, color: "var(--text-primary)" }}>
             {config.display_name}
             {isTestProvider && (
-              <span className="badge warn" style={{ fontSize: 10 }}>DEV TEST DOUBLE</span>
+              <span className="badge badge-warning" style={{ fontSize: 10 }}>DEV TEST DOUBLE</span>
             )}
           </h3>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-            ID: <code className="font-mono">{config.provider}</code>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+            Adapter: <code className="font-mono">{config.provider}</code>
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {config.configured ? (
-            <span className="badge ok">Configured</span>
+            <span className="badge badge-ok" style={{ fontSize: 10.5 }}>Configured</span>
           ) : (
-            <span className="badge muted">Not Configured</span>
+            <span className="badge badge-neutral" style={{ fontSize: 10.5 }}>Not Set</span>
           )}
 
           {config.enabled ? (
-            <span className="badge info">Enabled</span>
+            <span className="badge badge-indigo" style={{ fontSize: 10.5 }}>Enabled</span>
           ) : (
-            <span className="badge muted">Disabled</span>
+            <span className="badge badge-neutral" style={{ fontSize: 10.5 }}>Disabled</span>
           )}
         </div>
       </div>
 
-      {/* Provider connection status */}
+      {/* Health Status Pill */}
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          background: "var(--surface-inset)",
-          padding: "6px 10px",
-          borderRadius: "var(--radius-sm)",
-          marginBottom: 12,
-          fontSize: 11.5,
-          border: "1px solid var(--border-subtle)",
+          backgroundColor: "var(--bg-app)",
+          padding: "6px 12px",
+          borderRadius: "var(--radius-md)",
+          marginBottom: 14,
+          fontSize: 12,
+          border: "1px solid var(--border-app)",
         }}
       >
-        <span style={{ color: "var(--text-muted)" }}>Health:</span>
+        <span style={{ color: "var(--text-muted)", fontSize: 11.5 }}>Connection Health:</span>
         <span
           className={`badge ${
             config.connection_status === "healthy"
-              ? "ok"
+              ? "badge-ok"
               : config.connection_status === "unhealthy"
-              ? "danger"
-              : "muted"
+              ? "badge-danger"
+              : "badge-neutral"
           }`}
-          style={{ fontSize: 10 }}
+          style={{ fontSize: 10.5, textTransform: "uppercase" }}
         >
-          {config.connection_status.toUpperCase()}
+          {config.connection_status}
         </span>
       </div>
 
       {message && (
         <div
-          className={`notice-box ${message.type === "error" ? "danger" : "info"}`}
+          className={`notice-box ${message.type === "error" ? "danger" : "ok"}`}
           style={{ marginBottom: 12, padding: "8px 10px", fontSize: 12 }}
         >
           {message.text}
@@ -239,12 +241,14 @@ export function ProviderCard({
         </div>
       )}
 
-      {/* Configuration Form */}
-      <div style={{ flex: 1 }}>
-        <div className="form-group">
-          <label className="form-label">Default Model</label>
+      {/* Form Fields */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+            Default Model
+          </label>
           <select
-            className="input mono"
+            className="form-select font-mono"
             value={defaultModel}
             onChange={(e) => setDefaultModel(e.target.value)}
           >
@@ -259,46 +263,48 @@ export function ProviderCard({
         {/* API Key Authentication */}
         {config.auth_type === "api_key" && (
           <>
-            <div className="form-group">
-              <label className="form-label">
-                API Key {config.masked_api_key && "(Stored & Masked)"}
+            <div>
+              <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                API Secret Key {config.masked_api_key && "(Stored & Masked)"}
               </label>
               <input
                 type="password"
-                className="input mono"
+                className="form-input font-mono"
                 placeholder={config.masked_api_key || "sk-..."}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 autoComplete="off"
               />
-              <div className="form-hint">
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                 {config.masked_api_key ? (
-                  <>
-                    Current: <code>{config.masked_api_key}</code>. Leave blank to keep existing.
-                  </>
+                  <>Current: <code>{config.masked_api_key}</code></>
                 ) : (
-                  "Enter secret key to configure provider."
+                  "Enter secret API key to configure provider."
                 )}
               </div>
             </div>
 
             {config.provider === "openai" && (
               <>
-                <div className="form-group">
-                  <label className="form-label">Organization ID (Optional)</label>
+                <div>
+                  <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                    Organization ID (Optional)
+                  </label>
                   <input
                     type="text"
-                    className="input mono"
+                    className="form-input font-mono"
                     placeholder="org-..."
                     value={organizationId}
                     onChange={(e) => setOrganizationId(e.target.value)}
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Base URL (Optional)</label>
+                <div>
+                  <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                    Base URL Override (Optional)
+                  </label>
                   <input
                     type="text"
-                    className="input mono"
+                    className="form-input font-mono"
                     placeholder="https://api.openai.com/v1"
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
@@ -312,10 +318,12 @@ export function ProviderCard({
         {/* Bedrock IAM Authentication */}
         {config.auth_type === "iam_role" && (
           <>
-            <div className="form-group">
-              <label className="form-label">AWS Region</label>
+            <div>
+              <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                AWS Region
+              </label>
               <select
-                className="input mono"
+                className="form-select font-mono"
                 value={region}
                 onChange={(e) => setRegion(e.target.value)}
               >
@@ -326,29 +334,33 @@ export function ProviderCard({
                 <option value="ap-northeast-1">ap-northeast-1 (Tokyo)</option>
               </select>
             </div>
-            <div className="notice-box info" style={{ fontSize: 11.5, marginTop: 8, padding: "8px 10px" }}>
-              AWS authentication resolves automatically via ECS Task IAM Role. No static secret keys required.
+            <div className="notice-box info" style={{ fontSize: 11.5, padding: "8px 10px" }}>
+              AWS IAM Task Role credentials are used automatically. No static AWS keys required.
             </div>
           </>
         )}
 
-        {/* Test Provider Parameters */}
+        {/* Test Double Parameters */}
         {isTestProvider && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div className="form-group">
-              <label className="form-label">Synthetic Input Tokens</label>
+            <div>
+              <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                Mock Input Tokens
+              </label>
               <input
                 type="number"
-                className="input mono"
+                className="form-input font-mono"
                 value={inputTokens}
                 onChange={(e) => setInputTokens(Number(e.target.value))}
               />
             </div>
-            <div className="form-group">
-              <label className="form-label">Synthetic Output Tokens</label>
+            <div>
+              <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                Mock Output Tokens
+              </label>
               <input
                 type="number"
-                className="input mono"
+                className="form-input font-mono"
                 value={outputTokens}
                 onChange={(e) => setOutputTokens(Number(e.target.value))}
               />
@@ -357,46 +369,46 @@ export function ProviderCard({
         )}
       </div>
 
-      {/* Actions */}
+      {/* Action Buttons */}
       <div
         style={{
-          marginTop: 14,
-          paddingTop: 10,
-          borderTop: "1px solid var(--border-subtle)",
+          marginTop: 16,
+          paddingTop: 12,
+          borderTop: "1px solid var(--border-app)",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          gap: 6,
+          gap: 8,
           flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 8 }}>
           <button
             type="button"
             className="btn btn-primary btn-sm"
             onClick={handleSave}
             disabled={saving || testing}
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving..." : "Save Config"}
           </button>
 
           <button
             type="button"
-            className="btn btn-sm"
+            className="btn btn-outline btn-sm"
             onClick={handleTestConnection}
             disabled={testing || saving || (!config.configured && !apiKey)}
           >
-            {testing ? "Testing..." : "Test"}
+            {testing ? "Testing..." : "Test Connection"}
           </button>
         </div>
 
         <button
           type="button"
-          className={`btn btn-sm ${config.enabled ? "" : "btn-success"}`}
+          className={`btn btn-sm ${config.enabled ? "btn-outline" : "btn-primary"}`}
           onClick={handleToggleEnabled}
           disabled={saving || testing || (!config.configured && !config.enabled)}
         >
-          {config.enabled ? "Disable" : "Enable"}
+          {config.enabled ? "Disable Provider" : "Enable Provider"}
         </button>
       </div>
     </div>

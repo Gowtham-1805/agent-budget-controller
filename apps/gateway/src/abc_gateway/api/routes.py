@@ -724,6 +724,51 @@ async def playground_chat(
             block_reason=f"{denial.code.value}: {denial.detail or denial.blocking_scope}",
             provider_calls_made=0,
         )
+    except Exception as exc:
+        err_msg = str(exc)
+        steps.append(
+            S.PlaygroundLifecycleStep(
+                step_number=8,
+                name="Provider Inference",
+                description=f"PROVIDER ERROR: {err_msg}",
+                status="blocked",
+                details={"error": err_msg},
+            )
+        )
+        steps.append(
+            S.PlaygroundLifecycleStep(
+                step_number=10,
+                name="Reconciliation & Ledger Recording",
+                description="Released budget reservation after provider failure. Zero spend billed.",
+                status="completed",
+            )
+        )
+
+        return S.PlaygroundRunResponse(
+            request_id=request_id,
+            agent_id=body.agent_id,
+            decision="PROVIDER_ERROR",
+            status="502 Bad Gateway",
+            requested_model=policy.routing.preferred.model,
+            effective_model=policy.routing.preferred.model,
+            substituted=False,
+            preflight_input_tokens=prompt_tokens,
+            actual_input_tokens=0,
+            reserved_output_tokens=output_ceiling,
+            actual_output_tokens=0,
+            total_tokens=0,
+            estimated_cost_usd="0.000000",
+            actual_cost_usd="0.000000",
+            response_text=(
+                f"PROVIDER DISPATCH ERROR: {err_msg}\n\n"
+                "Tip: If you are using OpenAI/Anthropic/Bedrock, make sure a valid API key is set in 'Providers' settings. "
+                "For local testing without live API keys, select an agent routed to the 'test' provider."
+            ),
+            lifecycle_steps=steps,
+            blocked=True,
+            block_reason=f"Provider Error: {err_msg}",
+            provider_calls_made=1,
+        )
 
 
 # ---------------------------------------------------------------------------

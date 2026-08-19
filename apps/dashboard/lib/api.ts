@@ -324,13 +324,15 @@ export async function getCatalogModels(provider?: string): Promise<CatalogModel[
 // Formatters
 // ---------------------------------------------------------------------------
 
-export function usd(value: string | number, decimals = 2): string {
-  const n = typeof value === "string" ? Number.parseFloat(value) : value;
-  if (Number.isNaN(n)) return "$0.00";
+export function usd(value?: string | number | null, decimals = 2): string {
+  if (value === null || value === undefined || value === "") return "$0.00";
+  const n = typeof value === "string" ? Number.parseFloat(value) : Number(value);
+  if (Number.isNaN(n) || !Number.isFinite(n)) return "$0.00";
   return `$${n.toFixed(decimals)}`;
 }
 
-export function tokens(value: number): string {
+export function tokens(value?: number | null): string {
+  if (value === null || value === undefined || typeof value !== "number" || Number.isNaN(value)) return "0";
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
   return String(value);

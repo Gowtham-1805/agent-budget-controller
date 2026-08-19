@@ -4,7 +4,17 @@ import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { EditAgentBudgetModal } from "../../../components/EditAgentBudgetModal";
 import { EditModelPolicyModal } from "../../../components/EditModelPolicyModal";
-import { ChevronRightIcon, PlayIcon, SlidersIcon } from "../../../components/Icons";
+import {
+  ChevronRightIcon,
+  PlayIcon,
+  SlidersIcon,
+  CpuIcon,
+  ShieldIcon,
+  RefreshCwIcon,
+  AlertCircleIcon,
+  TerminalIcon,
+  BookOpenIcon,
+} from "../../../components/Icons";
 import { PauseAgentModal } from "../../../components/PauseAgentModal";
 import { ResumeAgentModal } from "../../../components/ResumeAgentModal";
 import { tokens, usd } from "../../../lib/api";
@@ -20,28 +30,34 @@ export default function AgentDetailPage({
 
   const [agent, setAgent] = useState<AgentSummary | null>(null);
   const [sessions, setSessions] = useState<SessionView[]>([]);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [modal, setModal] = useState<"budget" | "policy" | "pause" | "resume" | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   function loadAgentData() {
     setLoading(true);
+    setError(null);
     Promise.allSettled([
       fetch(`/api/agents`).then((r) => r.json()),
       fetch(`/api/sessions?agent_id=${encodeURIComponent(agentId)}`).then((r) => r.json()),
+      fetch(`/api/ledger?agent_id=${encodeURIComponent(agentId)}&limit=10`).then((r) => r.ok ? r.json() : []).then((d) => Array.isArray(d) ? d : d.entries || []),
     ])
-      .then(([agentsRes, sessRes]) => {
+      .then(([agentsRes, sessRes, ledRes]) => {
         if (agentsRes.status === "fulfilled" && Array.isArray(agentsRes.value)) {
           const found = agentsRes.value.find((a: AgentSummary) => a.agent_id === agentId);
           if (found) setAgent(found);
           else setError(`Agent '${agentId}' not found.`);
         }
         if (sessRes.status === "fulfilled" && Array.isArray(sessRes.value)) {
-          setSessions(sessRes.value);
+          setSessions(sessRes.value.filter((s: SessionView) => s.agent_id === agentId));
+        }
+        if (ledRes.status === "fulfilled" && Array.isArray(ledRes.value)) {
+          setLedger(ledRes.value);
         }
       })
       .catch((err) => {
-        setError(err.message);
+        setError(err.message || "Failed to load agent details");
       })
       .finally(() => {
         setLoading(false);
@@ -54,22 +70,20 @@ export default function AgentDetailPage({
 
   if (loading) {
     return (
-      <main>
-        <div className="table-container">
-          <div className="empty-state">Loading agent details...</div>
-        </div>
-      </main>
+      <div className="shadcn-card" style={{ textAlign: "center", padding: 48 }}>
+        Loading agent details...
+      </div>
     );
   }
 
   if (!agent) {
     return (
-      <main>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="notice-box danger">Agent &apos;{agentId}&apos; could not be found.</div>
-        <Link href="/agents" className="btn btn-sm" style={{ marginTop: 12 }}>
+        <Link href="/agents" className="btn btn-outline btn-sm" style={{ width: "fit-content" }}>
           &larr; Back to Agents
         </Link>
-      </main>
+      </div>
     );
   }
 
@@ -83,42 +97,50 @@ export default function AgentDetailPage({
   const isWarning = agent.utilization_percent >= 80 && !isExhausted;
 
   return (
-    <main>
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       {/* Breadcrumb */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-        <Link href="/agents" style={{ color: "var(--text-secondary)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+        <Link href="/agents" style={{ color: "var(--text-secondary)", textDecoration: "none" }}>
           Agents
         </Link>
         <ChevronRightIcon size={12} />
-        <span style={{ color: "var(--text-primary)" }}>{agent.agent_id}</span>
+        <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{agent.agent_id}</span>
       </div>
 
       {/* Header */}
-      <div className="page-header">
+      <div className="page-header" style={{ marginBottom: 0 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <h1 className="page-title">{agent.agent_id}</h1>
             {isRunaway ? (
-              <span className="badge danger">Runaway Paused</span>
+              <span className="badge badge-danger">Runaway Paused</span>
             ) : isPaused ? (
-              <span className="badge warn">Paused</span>
+              <span className="badge badge-warning">Paused</span>
             ) : isExhausted ? (
-              <span className="badge danger">100% Blocked</span>
+              <span className="badge badge-danger">100% Blocked</span>
             ) : isWarning ? (
-              <span className="badge warn">80% Warning</span>
+              <span className="badge badge-warning">80% Warning</span>
             ) : (
-              <span className="badge ok">Active</span>
+              <span className="badge badge-ok">Active</span>
             )}
           </div>
           <p className="page-description">
-            Team: <Link href={`/teams/${agent.team_id}`} style={{ color: "var(--primary-text)" }}>{agent.team_id}</Link> &bull; Window: <strong>{agent.window_type}</strong> &bull; Output Ceiling: <strong>{agent.default_max_output_tokens} tokens/call</strong>
+            Team: <Link href={`/teams/${agent.team_id}`} style={{ color: "var(--brand-blue)", textDecoration: "none", fontWeight: 600 }}>{agent.team_id}</Link> &bull; Window: <strong>{agent.window_type}</strong> &bull; Output Ceiling: <strong>{agent.default_max_output_tokens} tokens/call</strong>
           </p>
         </div>
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button
             type="button"
-            className="btn btn-sm"
+            className="btn btn-outline btn-sm"
+            onClick={loadAgentData}
+          >
+            <RefreshCwIcon size={12} />
+            <span>Refresh</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
             onClick={() => setModal("budget")}
           >
             <SlidersIcon size={12} />
@@ -126,15 +148,16 @@ export default function AgentDetailPage({
           </button>
           <button
             type="button"
-            className="btn btn-sm"
+            className="btn btn-outline btn-sm"
             onClick={() => setModal("policy")}
           >
-            <span>Model Policy</span>
+            <span>Model Routing</span>
           </button>
           {isPaused ? (
             <button
               type="button"
-              className="btn btn-success btn-sm"
+              className="btn btn-primary btn-sm"
+              style={{ backgroundColor: "var(--ok)", borderColor: "var(--ok)" }}
               onClick={() => setModal("resume")}
             >
               Resume Agent
@@ -142,7 +165,8 @@ export default function AgentDetailPage({
           ) : (
             <button
               type="button"
-              className="btn btn-danger btn-sm"
+              className="btn btn-outline btn-sm"
+              style={{ color: "var(--danger)", borderColor: "var(--danger-border)" }}
               onClick={() => setModal("pause")}
             >
               Pause Agent
@@ -153,16 +177,17 @@ export default function AgentDetailPage({
             className="btn btn-primary btn-sm"
           >
             <PlayIcon size={12} />
-            <span>Open in Playground</span>
+            <span>Test in Playground</span>
           </Link>
         </div>
       </div>
 
       {isPaused && (
-        <div className="notice-box danger" style={{ marginBottom: 20 }}>
+        <div className="notice-box danger">
+          <AlertCircleIcon size={16} />
           <div>
             <strong>Agent is administratively paused:</strong> {agent.pause_reason || "Intervention active."}
-            <div style={{ marginTop: 3, fontSize: 12 }}>
+            <div style={{ marginTop: 2, fontSize: 12 }}>
               New inference calls are locked at the gateway. Click &quot;Resume Agent&quot; with a justification to restore service.
             </div>
           </div>
@@ -170,30 +195,34 @@ export default function AgentDetailPage({
       )}
 
       {error && (
-        <div className="notice-box danger" style={{ marginBottom: 16 }}>
-          {error}
+        <div className="notice-box danger">
+          <AlertCircleIcon size={16} />
+          <span>{error}</span>
         </div>
       )}
 
       {/* Spend Meter & Stats Card */}
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <span style={{ fontWeight: 600, fontSize: 13 }}>Budget Consumption &amp; In-Flight Hold</span>
+      <div className="shadcn-card" style={{ display: "flex", flexDirection: "column", gap: 14, padding: 22 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div className="card-title">Budget Consumption &amp; In-Flight Hold</div>
+            <div className="card-subtitle">Real-time financial exposure evaluated atomically before provider dispatch</div>
+          </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <span className={`badge ${isExhausted ? "danger" : isWarning ? "warn" : "ok"}`}>
-              {agent.utilization_percent}% Committed
+            <span className={`badge ${isExhausted ? "badge-danger" : isWarning ? "badge-warning" : "badge-ok"}`} style={{ fontSize: 11.5 }}>
+              {agent.utilization_percent.toFixed(1)}% Committed
             </span>
             {effective > committed && (
-              <span className="badge info">
-                {effective}% Effective Exposure
+              <span className="badge badge-indigo" style={{ fontSize: 11.5 }}>
+                {effective.toFixed(1)}% Effective Exposure
               </span>
             )}
           </div>
         </div>
 
-        <div className="meter-rail" style={{ height: 6, marginBottom: 16 }}>
+        <div className="meter-rail">
           <div
-            className={`meter-fill ${isExhausted ? "danger" : isWarning ? "warn" : ""}`}
+            className={`meter-fill ${isExhausted ? "danger" : isWarning ? "warn" : "ok"}`}
             style={{ width: `${committed}%` }}
           />
           <div
@@ -202,25 +231,27 @@ export default function AgentDetailPage({
           />
         </div>
 
-        <div className="stats-strip" style={{ border: "none", background: "transparent", margin: 0 }}>
-          <div className="stat-cell" style={{ padding: "0 16px 0 0" }}>
+        <div className="stats-strip" style={{ margin: "4px 0 0", border: "1px solid var(--border-app)" }}>
+          <div className="stat-cell">
             <div className="stat-label">Periodic Cap</div>
-            <div className="stat-value money">{usd(agent.limit_usd)}</div>
+            <div className="stat-value money">{usd(agent.limit_usd, 2)}</div>
           </div>
 
-          <div className="stat-cell" style={{ padding: "0 16px" }}>
+          <div className="stat-cell">
             <div className="stat-label">Committed Spend</div>
             <div className="stat-value money">{usd(agent.committed_usd, 4)}</div>
           </div>
 
-          <div className="stat-cell" style={{ padding: "0 16px" }}>
-            <div className="stat-label">In-Flight (Reserved)</div>
-            <div className="stat-value money" style={{ color: "var(--info)" }}>
+          <div className="stat-cell">
+            <div className="stat-label" style={{ color: Number(agent.reserved_usd) > 0 ? "var(--cyan)" : "var(--text-muted)" }}>
+              In-Flight (Reserved)
+            </div>
+            <div className="stat-value money" style={{ color: "var(--cyan)" }}>
               {usd(agent.reserved_usd, 4)}
             </div>
           </div>
 
-          <div className="stat-cell" style={{ padding: "0 0 0 16px", borderRight: "none" }}>
+          <div className="stat-cell">
             <div className="stat-label">Available Balance</div>
             <div className="stat-value money" style={{ color: "var(--ok)" }}>
               {usd(agent.available_usd, 4)}
@@ -229,116 +260,121 @@ export default function AgentDetailPage({
         </div>
       </div>
 
-      {/* Detail Split: Token Volume & Model Policy */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 28 }}>
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Token Accounting</span>
+      {/* Detail Split: Token Accounting & Model Policy */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <div className="shadcn-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="card-header" style={{ marginBottom: 4 }}>
+            <div>
+              <div className="card-title">Token Accounting</div>
+              <div className="card-subtitle">Cumulative input and output token consumption</div>
+            </div>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12.5 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ color: "var(--text-muted)" }}>Cumulative Input Tokens</span>
-              <span className="money">{tokens(agent.input_tokens)}</span>
+              <span className="money font-mono">{tokens(agent.input_tokens)}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ color: "var(--text-muted)" }}>Cumulative Output Tokens</span>
-              <span className="money">{tokens(agent.output_tokens)}</span>
+              <span className="money font-mono">{tokens(agent.output_tokens)}</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border-subtle)", paddingTop: 6 }}>
-              <span style={{ color: "var(--text-muted)" }}>Total Token Volume</span>
-              <span className="money" style={{ fontWeight: 600 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border-app)", paddingTop: 8 }}>
+              <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>Total Token Volume</span>
+              <span className="money font-mono" style={{ fontWeight: 700 }}>
                 {tokens(agent.input_tokens + agent.output_tokens)}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Model Policy &amp; Fallbacks</span>
+        <div className="shadcn-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="card-header" style={{ marginBottom: 4 }}>
+            <div>
+              <div className="card-title">Model Policy &amp; Degradation Fallbacks</div>
+              <div className="card-subtitle">Dynamic substitution routing rules</div>
+            </div>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12.5 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ color: "var(--text-muted)" }}>Preferred Model</span>
-              <code className="font-mono">{agent.preferred_model}</code>
+              <code className="font-mono" style={{ fontSize: 12, backgroundColor: "var(--bg-muted)", padding: "2px 6px", borderRadius: 4 }}>
+                {agent.preferred_model}
+              </code>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ color: "var(--text-muted)" }}>Economy Fallback</span>
-              <code className="font-mono">{agent.fallback_models?.[0] || "None"}</code>
+              <code className="font-mono" style={{ fontSize: 12, backgroundColor: "var(--bg-muted)", padding: "2px 6px", borderRadius: 4 }}>
+                {agent.fallback_models?.[0] || "None"}
+              </code>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border-subtle)", paddingTop: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border-app)", paddingTop: 8 }}>
               <span style={{ color: "var(--text-muted)" }}>Substitution Under Pressure</span>
-              <span>
-                {agent.substitution_enabled ? (
-                  <span className="badge ok">Enabled</span>
-                ) : (
-                  <span className="badge muted">Disabled</span>
-                )}
+              <span className={`badge ${agent.substitution_enabled ? "badge-ok" : "badge-neutral"}`} style={{ fontSize: 11 }}>
+                {agent.substitution_enabled ? "Enabled" : "Disabled"}
               </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Sessions */}
-      <div style={{ marginBottom: 32 }}>
-        <div className="section-header">
-          <span className="section-title">Governed Sessions ({sessions.length})</span>
+      {/* Governed Sessions */}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+              Active &amp; Historical Sessions ({sessions.length})
+            </h2>
+            <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
+              Conversational session scopes drawing against this agent
+            </p>
+          </div>
         </div>
 
         {sessions.length === 0 ? (
-          <div className="table-container">
+          <div className="shadcn-card">
             <div className="empty-state">No sessions recorded for this agent yet.</div>
           </div>
         ) : (
-          <div className="table-container">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Session ID</th>
-                  <th>Status</th>
-                  <th>Limit</th>
-                  <th>Committed</th>
-                  <th>Available</th>
-                  <th>Closure Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.map((s) => (
-                  <tr key={s.session_id}>
-                    <td className="money" style={{ color: "var(--info)" }}>
-                      {s.session_id}
-                    </td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          s.status === "OPEN"
-                            ? "ok"
-                            : s.status.includes("BUDGET")
-                            ? "danger"
-                            : "muted"
-                        }`}
-                      >
-                        {s.status}
-                      </span>
-                    </td>
-                    <td className="money">{usd(s.limit_usd)}</td>
-                    <td className="money">{usd(s.committed_usd, 4)}</td>
-                    <td className="money">{usd(s.available_usd, 4)}</td>
-                    <td style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                      {s.close_reason || "—"}
-                    </td>
+          <div className="shadcn-card" style={{ padding: 0, overflow: "hidden" }}>
+            <div className="table-container" style={{ border: "none" }}>
+              <table className="shadcn-table">
+                <thead>
+                  <tr>
+                    <th>Session ID</th>
+                    <th>Status</th>
+                    <th>Session Limit</th>
+                    <th>Committed Spend</th>
+                    <th>Available Balance</th>
+                    <th>Closure Reason</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sessions.map((s) => (
+                    <tr key={s.session_id}>
+                      <td>
+                        <code style={{ fontSize: 12, color: "var(--brand-blue)" }}>{s.session_id}</code>
+                      </td>
+                      <td>
+                        <span className={`badge ${s.status === "OPEN" ? "badge-ok" : s.status.includes("BUDGET") ? "badge-danger" : "badge-neutral"}`} style={{ fontSize: 10.5 }}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td className="money">{usd(s.limit_usd, 2)}</td>
+                      <td className="money" style={{ fontWeight: 600 }}>{usd(s.committed_usd, 4)}</td>
+                      <td className="money" style={{ color: "var(--ok)", fontWeight: 600 }}>{usd(s.available_usd, 4)}</td>
+                      <td style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{s.close_reason || "Active"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Modals */}
+      {/* Interactive Modals */}
       {modal === "budget" && (
         <EditAgentBudgetModal
           agent={agent}
@@ -379,6 +415,6 @@ export default function AgentDetailPage({
           }}
         />
       )}
-    </main>
+    </div>
   );
 }

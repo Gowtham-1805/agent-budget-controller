@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { XIcon } from "./Icons";
+import { XIcon, UsersIcon } from "./Icons";
 
 interface CreateTeamModalProps {
   onClose: () => void;
@@ -51,17 +51,26 @@ export function CreateTeamModal({ onClose, onSuccess }: CreateTeamModalProps) {
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-content">
-        <div className="modal-header">
-          <div className="modal-title">Provision Engineering Team</div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
-            <XIcon size={14} />
+      <div className="modal-content" style={{ padding: 24, maxWidth: 520 }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+          <div>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+              Provision Engineering Team
+            </h3>
+            <p style={{ color: "var(--text-secondary)", fontSize: 12.5, marginTop: 4 }}>
+              Establish an overarching budget ceiling for member agents.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onClose}
+            style={{ padding: 4, marginTop: -2 }}
+          >
+            <XIcon size={16} />
           </button>
         </div>
-
-        <p style={{ color: "var(--text-secondary)", fontSize: 12.5, marginBottom: 16 }}>
-          Establish an overarching team budget ceiling. Member agents draw from their own limits, bounded by this team cap.
-        </p>
 
         {error && (
           <div className="notice-box danger" style={{ marginBottom: 14 }}>
@@ -69,13 +78,15 @@ export function CreateTeamModal({ onClose, onSuccess }: CreateTeamModalProps) {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label className="form-label">Team Identifier</label>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+              Team Identifier <span style={{ color: "var(--danger)" }}>*</span>
+            </label>
             <input
               type="text"
-              className="input mono"
-              placeholder="e.g. engineering, platform, search"
+              className="form-input font-mono"
+              placeholder="e.g. platform-infra, search-team, data-science"
               value={teamId}
               onChange={(e) => setTeamId(e.target.value)}
               required
@@ -84,11 +95,13 @@ export function CreateTeamModal({ onClose, onSuccess }: CreateTeamModalProps) {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div className="form-group">
-              <label className="form-label">Budget Limit (USD)</label>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                Periodic Ceiling (USD)
+              </label>
               <input
                 type="text"
-                className="input mono"
+                className="form-input font-mono"
                 placeholder="50.00"
                 value={amountUsd}
                 onChange={(e) => setAmountUsd(e.target.value)}
@@ -96,10 +109,12 @@ export function CreateTeamModal({ onClose, onSuccess }: CreateTeamModalProps) {
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Budget Window</label>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+                Budget Window
+              </label>
               <select
-                className="input mono"
+                className="form-select font-mono"
                 value={window}
                 onChange={(e) => setWindow(e.target.value)}
               >
@@ -110,23 +125,26 @@ export function CreateTeamModal({ onClose, onSuccess }: CreateTeamModalProps) {
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Warning Threshold (%)</label>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+              Warning Alert Threshold (%)
+            </label>
             <input
               type="number"
-              className="input mono"
+              className="form-input font-mono"
               min={1}
               max={99}
               value={warningPercent}
               onChange={(e) => setWarningPercent(Number(e.target.value))}
             />
-            <div className="form-hint">
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
               Fires a durable one-time warning alert when total committed spend crosses this threshold.
             </div>
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn" onClick={onClose} disabled={loading}>
+          {/* Modal Footer */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading}>
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={loading}>

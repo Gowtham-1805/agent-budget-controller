@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { AppHeader } from "../components/AppHeader";
+import { AppShell } from "../components/AppShell";
+import { TopHeader } from "../components/TopHeader";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,9 +17,15 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div className="page">
-          <AppHeader />
-          {children}
+        <div className="app-shell">
+          <AppShell>
+            <div className="main-viewport">
+              <TopHeader />
+              <div className="page-content-wrapper">
+                {children}
+              </div>
+            </div>
+          </AppShell>
         </div>
       </body>
     </html>

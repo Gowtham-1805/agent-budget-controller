@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { AgentSummary } from "../lib/types";
-import { CheckCircleIcon, XIcon } from "./Icons";
+import { CheckCircleIcon, XIcon, ShieldIcon } from "./Icons";
 
 interface ResumeAgentModalProps {
   agent: AgentSummary;
@@ -47,34 +47,45 @@ export function ResumeAgentModal({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-content">
-        <div className="modal-header">
-          <div className="modal-title">Restore Agent &bull; {agent.agent_id}</div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
-            <XIcon size={14} />
-          </button>
-        </div>
-
-        <div className="notice-box info" style={{ marginBottom: 14 }}>
-          <CheckCircleIcon size={16} style={{ color: "var(--info)", flexShrink: 0 }} />
+      <div className="modal-content" style={{ padding: 24, maxWidth: 520 }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
           <div>
-            Restoring service re-enables preflight authorization against remaining budget.
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+                Restore Agent to Service
+              </h3>
+              <span className="badge badge-neutral font-mono" style={{ fontSize: 11 }}>
+                {agent.agent_id}
+              </span>
+            </div>
+            <p style={{ color: "var(--text-secondary)", fontSize: 12.5, marginTop: 4 }}>
+              Re-enables preflight authorization against remaining budget.
+            </p>
           </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onClose}
+            style={{ padding: 4, marginTop: -2 }}
+          >
+            <XIcon size={16} />
+          </button>
         </div>
 
         {agent.pause_reason && (
           <div
             style={{
-              padding: "8px 12px",
-              background: "var(--surface-inset)",
-              borderRadius: "var(--radius-sm)",
-              border: "1px solid var(--border-subtle)",
+              padding: "10px 12px",
+              backgroundColor: "var(--bg-app)",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--border-app)",
               marginBottom: 14,
               fontSize: 12,
               color: "var(--text-secondary)",
             }}
           >
-            <strong style={{ color: "var(--warn)" }}>Intervention Reason:</strong> {agent.pause_reason}
+            <strong style={{ color: "var(--warning)" }}>Prior Pause Reason:</strong> {agent.pause_reason}
           </div>
         )}
 
@@ -84,30 +95,36 @@ export function ResumeAgentModal({
           </div>
         )}
 
-        <form onSubmit={handleResume}>
-          <div className="form-group">
-            <label className="form-label">
-              Review Justification / Root Cause Resolution <span style={{ color: "var(--danger)" }}>*</span>
+        <form onSubmit={handleResume} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 4 }}>
+              Root Cause Justification / Resolution Summary <span style={{ color: "var(--danger)" }}>*</span>
             </label>
             <input
               type="text"
-              className="input"
+              className="form-input font-mono"
               placeholder="e.g. Verified agent prompt loop resolved in patch v1.4"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               required
               autoFocus
             />
-            <div className="form-hint">
-              Mandatory audit requirement: resuming without recording why is prohibited.
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+              Mandatory audit requirement: resuming without recording why is refused by the gateway.
             </div>
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn" onClick={onClose} disabled={loading}>
+          {/* Modal Footer */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-success" disabled={loading}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{ backgroundColor: "var(--ok)", borderColor: "var(--ok)" }}
+              disabled={loading}
+            >
               {loading ? "Restoring..." : "Restore Service"}
             </button>
           </div>
