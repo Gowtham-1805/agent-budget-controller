@@ -18,6 +18,7 @@ __pycache__/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.build/
 *.egg-info/
 dist/
 build/
