@@ -1,0 +1,135 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, staging, prod]
+        default: dev
+      run_smoke_test:
+        description: Run the deployed smoke test afterwards
+        type: boolean
+        default: true
+
+# Only one deployment per environment at a time. Two concurrent applies against
+# the same budget tables is not a situation worth discovering in production.
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # OIDC to AWS: no long-lived access keys in GitHub
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+jobs:
+  guard:
+    name: Verify the invariants before deploying
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,providers,observability]"
+
+      # A deploy that skips these could ship a gateway that overspends. The
+      # whole point of the system is that this cannot happen quietly.
+      - name: Financial invariants
+        run: |
+          pytest tests/concurrency -q
+          pytest tests/property -q
+          pytest tests/failure_injection -q
+          pytest tests/contract -q
+
+  deploy:
+    name: Build, push, and deploy
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Terraform init
+        run: terraform -chdir=infrastructure/terraform init
+
+      # Applied in two passes: the first creates the ECR repository, the second
+      # deploys the service against the image we then push into it. Terraform
+      # cannot create a repository and reference an image inside it at once.
+      - name: Provision the registry
+        run: |
+          terraform -chdir=infrastructure/terraform apply \
+            -auto-approve \
+            -var="environment=${{ inputs.environment }}" \
+            -target=aws_ecr_repository.gateway
+
+      - name: Build and push the image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          REPO=$(terraform -chdir=infrastructure/terraform output -raw ecr_repository_url)
+          TAG="${GITHUB_SHA::12}"
+          docker build -t "$REPO:$TAG" -t "$REPO:latest" .
+          docker push "$REPO:$TAG"
+          docker push "$REPO:latest"
+          echo "IMAGE=$REPO:$TAG" >> "$GITHUB_ENV"
+
+      - name: Apply infrastructure
+        run: |
+          terraform -chdir=infrastructure/terraform apply \
+            -auto-approve \
+            -var="environment=${{ inputs.environment }}" \
+            -var="container_image=${IMAGE}"
+
+      - name: Wait for the service to stabilise
+        run: |
+          CLUSTER=$(terraform -chdir=infrastructure/terraform output -raw ecs_cluster_name)
+          SERVICE=$(terraform -chdir=infrastructure/terraform output -raw ecs_service_name)
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+      - name: Capture the deployed endpoint
+        id: endpoint
+        run: |
+          URL=$(terraform -chdir=infrastructure/terraform output -raw gateway_url)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Deployed to $URL"
+
+      - name: Deployed smoke test
+        if: ${{ inputs.run_smoke_test }}
+        env:
+          GATEWAY_URL: ${{ steps.endpoint.outputs.url }}
+          ABC_ADMIN_API_KEY: ${{ secrets.ABC_ADMIN_API_KEY }}
+        run: |
+          pip install httpx
+          python scripts/smoke_test.py
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed"
+            echo ""
+            echo "- Environment: \`${{ inputs.environment }}\`"
+            echo "- Gateway: ${{ steps.endpoint.outputs.url }}"
+            echo "- Image: \`${IMAGE}\`"
+            echo ""
+            echo "Remember to \`terraform destroy\` when this environment is no longer needed."
+          } >> "$GITHUB_STEP_SUMMARY"

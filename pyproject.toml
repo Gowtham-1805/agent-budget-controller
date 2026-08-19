@@ -1,0 +1,157 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-budget-controller"
+version = "1.0.0"
+description = "A financial authorization gateway for AI inference: reserve-before-inference budget enforcement across team, agent, session, and model-allocation scopes."
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+# Pins are exact. This system's correctness depends on the precise behaviour of
+# boto3/moto around TransactWriteItems cancellation reasons; a floating version
+# can silently change what our concurrency proofs actually prove.
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.3",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.15.0",
+    "boto3==1.43.73",
+    "botocore==1.43.73",
+    "httpx==0.28.1",
+    "structlog==26.1.0",
+    "orjson==3.12.0",
+    "python-ulid==4.0.1",
+    # Windows ships no system tz database, so zoneinfo cannot resolve even
+    # "UTC" without this. Billing windows are computed in the tenant's
+    # timezone, so it is a hard runtime dependency, not a dev convenience.
+    "tzdata==2026.3",
+]
+
+[project.optional-dependencies]
+providers = [
+    "openai==3.2.0",
+    "anthropic==0.122.0",
+    "tiktoken==0.14.0",
+]
+observability = [
+    "langfuse==4.14.4",
+    "opentelemetry-sdk==1.44.0",
+    "opentelemetry-exporter-otlp-proto-http==1.44.0",
+    "aws-lambda-powertools==3.34.0",
+]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-xdist==3.8.0",
+    "moto[dynamodb,server]==5.2.2",
+    "hypothesis==6.165.10",
+    "ruff==0.16.3",
+    "mypy==2.3.1",
+    "types-boto3[dynamodb]",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["apps/gateway/src/abc_gateway"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["apps/gateway/src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["error::DeprecationWarning:abc_gateway.*"]
+# moto's embedded werkzeug logs every mock HTTP call; useful only when
+# debugging the mock itself.
+log_cli = false
+log_level = "WARNING"
+markers = [
+    # Concurrency tests coordinate threads through a barrier and must never be
+    # split across xdist workers, or the barrier deadlocks.
+    "serial: must run in a single process (excluded from -n auto runs)",
+    "live_provider: calls a real LLM provider and spends real money",
+    "live_aws: requires real AWS credentials",
+]
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["apps/gateway/src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "RUF", "ASYNC"]
+ignore = [
+    "E501",   # line length is handled by the formatter
+    "B008",   # FastAPI's Depends() in defaults is idiomatic
+    # Exceptions here are named for what happened, not for being errors:
+    # `AuthorizationDenied`, `TransactionConflict`, `IdempotentReplay`. At a
+    # call site `except AuthorizationDenied` reads as the outcome it is, and
+    # `IdempotentReplayError` would actively mislead -- a replay is a success.
+    "N818",
+    # `from ..repo import attributes as A` is used pervasively in the storage
+    # layer, where expressions reference a dozen attribute names per statement.
+    # The short alias keeps those readable.
+    "N812",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802", "N803"]
+# The telemetry sink's drain() takes a timeout by design: it is called on
+# shutdown, and observability must never delay it. asyncio.timeout would push
+# cancellation into the caller, which is the opposite of what is wanted.
+"apps/gateway/src/abc_gateway/observability/telemetry.py" = ["ASYNC109"]
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "apps/gateway/src"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["moto.*", "langfuse.*", "tiktoken.*", "ulid.*", "structlog.*"]
+ignore_missing_imports = true
+
+# Strict typing earns its keep in the domain, pricing, engine and storage
+# layers -- that is where money is computed and where a type error becomes a
+# financial error. Those modules stay fully strict.
+#
+# The HTTP layer is a different situation. FastAPI's route and exception-handler
+# decorators are untyped, and its dependency-injection defaults defeat
+# `disallow_untyped_decorators` no matter how the handlers themselves are
+# annotated. Silencing those two checks here is honest about where the tool
+# helps; it is not a blanket exemption, and everything else stays on.
+[[tool.mypy.overrides]]
+module = ["abc_gateway.api.*", "abc_gateway.main"]
+disallow_untyped_decorators = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+
+# The repository is injected as a Protocol-shaped duck type to avoid a circular
+# import between the engine and the storage layer. Annotating those parameters
+# concretely would reintroduce the cycle.
+[[tool.mypy.overrides]]
+module = [
+    "abc_gateway.engine.effects",
+    "abc_gateway.engine.routing",
+    "abc_gateway.engine.budget_engine",
+    "abc_gateway.runaway.*",
+    "abc_gateway.repo.memory.*",
+    "abc_gateway.repo.dynamo.budget_repo",
+    "abc_gateway.providers",
+    "abc_gateway.providers.fake",
+    "abc_gateway.observability.*",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_any_generics = false

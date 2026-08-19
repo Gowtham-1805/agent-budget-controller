@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "CreateTable spec for the immutable ledger.",
+    "",
+    "This lives in its own table for three reasons:",
+    "  1. Immutability becomes an IAM guarantee, not a code convention -- the",
+    "     gateway role gets PutItem here but not UpdateItem or DeleteItem, which",
+    "     cannot be expressed if budget counters share the table.",
+    "  2. Every stream record is exactly one financial event with a stable id, so",
+    "     the runaway detector reads a clean feed instead of filtering millions of",
+    "     counter mutations.",
+    "  3. TransactWriteItems spans tables in-region, so splitting costs no",
+    "     atomicity: a reconcile still writes counters and the ledger entry",
+    "     together or not at all.",
+    "",
+    "Stream view is NEW_IMAGE: entries are never modified, so an old image would",
+    "always be empty."
+  ],
+  "TableName": "abc_ledger",
+  "BillingMode": "PAY_PER_REQUEST",
+  "AttributeDefinitions": [
+    { "AttributeName": "PK", "AttributeType": "S" },
+    { "AttributeName": "SK", "AttributeType": "S" },
+    { "AttributeName": "GSI1PK", "AttributeType": "S" },
+    { "AttributeName": "GSI1SK", "AttributeType": "S" }
+  ],
+  "KeySchema": [
+    { "AttributeName": "PK", "KeyType": "HASH" },
+    { "AttributeName": "SK", "KeyType": "RANGE" }
+  ],
+  "GlobalSecondaryIndexes": [
+    {
+      "_comment": "Time-ordered per-agent ledger, so an audit over a date range is a range scan rather than a filtered scan.",
+      "IndexName": "GSI1",
+      "KeySchema": [
+        { "AttributeName": "GSI1PK", "KeyType": "HASH" },
+        { "AttributeName": "GSI1SK", "KeyType": "RANGE" }
+      ],
+      "Projection": { "ProjectionType": "ALL" }
+    }
+  ],
+  "StreamSpecification": {
+    "StreamEnabled": true,
+    "StreamViewType": "NEW_IMAGE"
+  }
+}

@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12"
+  # tiktoken downloads its BPE table on first use. In CI that is a slow,
+  # network-dependent surprise, so it is cached rather than re-fetched.
+  TIKTOKEN_CACHE_DIR: /tmp/tiktoken-cache
+
+jobs:
+  quality:
+    name: Lint and type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev,providers,observability]"
+
+      - name: Lint
+        run: ruff check apps tests
+
+      - name: Format check
+        run: ruff format --check apps tests
+
+      - name: Type-check
+        run: mypy apps/gateway/src/abc_gateway
+
+  invariants:
+    name: Financial invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev,providers,observability]"
+
+      # These run as their own job, before everything else, because they are
+      # the tests that decide whether the system is safe to deploy at all. If
+      # `committed + reserved <= limit` can be broken, nothing else matters.
+      - name: Hard-cap race
+        run: pytest tests/concurrency -q
+
+      - name: Property-based invariants (deep search)
+        run: pytest tests/property -q --hypothesis-profile=thorough
+
+      - name: Failure injection
+        run: pytest tests/failure_injection -q
+
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Cache tiktoken
+        uses: actions/cache@v4
+        with:
+          path: /tmp/tiktoken-cache
+          key: tiktoken-${{ runner.os }}
+
+      - name: Install
+        run: pip install -e ".[dev,providers,observability]"
+
+      - name: Unit
+        run: pytest tests/unit -q
+
+      # Runs the same assertions against the in-memory store and against real
+      # DynamoDB semantics via moto. This is what stops the fast backend being
+      # a comfortable fiction.
+      - name: Contract (both backends)
+        run: pytest tests/contract -q
+
+      - name: Acceptance
+        run: pytest tests/acceptance -q
+
+      - name: End-to-end
+        run: pytest tests/e2e -q
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Format
+        run: terraform -chdir=infrastructure/terraform fmt -check -recursive
+
+      - name: Init
+        run: terraform -chdir=infrastructure/terraform init -backend=false
+
+      - name: Validate
+        run: terraform -chdir=infrastructure/terraform validate
+
+  docker:
+    name: Container image
+    runs-on: ubuntu-latest
+    needs: [quality, invariants]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: agent-budget-controller:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify the image starts and reports healthy
+        run: |
+          docker run -d --name gw \
+            -e ABC_USE_MEMORY_STORE=true \
+            -e ABC_ENVIRONMENT=ci \
+            -p 8000:8000 \
+            agent-budget-controller:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/healthz; then
+              echo "gateway is healthy"
+              docker rm -f gw
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "gateway failed to become healthy"
+          docker logs gw
+          docker rm -f gw
+          exit 1
+
+      - name: Confirm the image runs as a non-root user
+        run: |
+          uid=$(docker run --rm agent-budget-controller:ci id -u)
+          test "$uid" != "0" || { echo "image runs as root"; exit 1; }
+          echo "runs as uid $uid"

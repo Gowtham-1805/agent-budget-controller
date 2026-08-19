@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "CreateTable spec for the core table. Used verbatim by the test suite and",
+    "mirrored by Terraform, so the schema the tests prove against is the schema",
+    "that gets deployed.",
+    "",
+    "Stream view type is NEW_AND_OLD_IMAGES because the threshold backstop needs",
+    "to see a counter's value before and after a change to decide whether an",
+    "update crossed a boundary."
+  ],
+  "TableName": "abc_core",
+  "BillingMode": "PAY_PER_REQUEST",
+  "AttributeDefinitions": [
+    { "AttributeName": "PK", "AttributeType": "S" },
+    { "AttributeName": "SK", "AttributeType": "S" },
+    { "AttributeName": "GSI1PK", "AttributeType": "S" },
+    { "AttributeName": "GSI1SK", "AttributeType": "S" },
+    { "AttributeName": "GSI2PK", "AttributeType": "S" },
+    { "AttributeName": "GSI2SK", "AttributeType": "S" }
+  ],
+  "KeySchema": [
+    { "AttributeName": "PK", "KeyType": "HASH" },
+    { "AttributeName": "SK", "KeyType": "RANGE" }
+  ],
+  "GlobalSecondaryIndexes": [
+    {
+      "_comment": "Dashboard rollups: every budget state of a given scope type in a window.",
+      "IndexName": "GSI1",
+      "KeySchema": [
+        { "AttributeName": "GSI1PK", "KeyType": "HASH" },
+        { "AttributeName": "GSI1SK", "KeyType": "RANGE" }
+      ],
+      "Projection": { "ProjectionType": "ALL" }
+    },
+    {
+      "_comment": "Sparse index over unsettled reservations, for the stale-reservation sweeper. Entries are removed on settlement, so it only ever holds outstanding work.",
+      "IndexName": "GSI2",
+      "KeySchema": [
+        { "AttributeName": "GSI2PK", "KeyType": "HASH" },
+        { "AttributeName": "GSI2SK", "KeyType": "RANGE" }
+      ],
+      "Projection": { "ProjectionType": "ALL" }
+    }
+  ],
+  "StreamSpecification": {
+    "StreamEnabled": true,
+    "StreamViewType": "NEW_AND_OLD_IMAGES"
+  },
+  "TimeToLiveSpecification": {
+    "_comment": "Housekeeping only. TTL never decides whether a request is authorised -- budget windows are addressed by key, so a new period begins on the stroke of the boundary rather than when DynamoDB gets around to deleting the old item.",
+    "AttributeName": "housekeeping_ttl",
+    "Enabled": true
+  }
+}

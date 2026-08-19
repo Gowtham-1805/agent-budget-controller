@@ -1,0 +1,180 @@
+{
+  "version": "2026-08-19.1",
+  "published_at": "2026-08-19T00:00:00Z",
+  "_README": [
+    "Prices are expressed in USD per MILLION tokens, as decimal STRINGS.",
+    "Strings, not JSON numbers: a float literal has already lost precision",
+    "before the loader ever sees it, so the loader rejects floats outright.",
+    "",
+    "THE 'test' PROVIDER IS NOT A REAL PROVIDER. Its rates are round numbers",
+    "chosen so the acceptance tests are exactly reproducible -- 1000 input +",
+    "1000 output tokens on test::premium costs precisely $0.04. Never route",
+    "production traffic to it.",
+    "",
+    "VERIFY REAL PROVIDER RATES BEFORE PRODUCTION USE. The entries below carry",
+    "a 'verified_at' date. Provider pricing changes, and this file is a",
+    "snapshot, not a live feed. Run `make verify-pricing` for the checklist.",
+    "Because every ledger entry pins the catalog version it was priced with,",
+    "correcting a rate here never rewrites historical spend."
+  ],
+
+  "models": [
+    {
+      "provider": "test",
+      "model": "premium",
+      "_comment": "Deterministic fixture: 1k in + 1k out == $0.04 exactly.",
+      "input_per_million": "10.00",
+      "output_per_million": "30.00",
+      "cached_input_per_million": "5.00",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 200000,
+        "max_output_tokens": 32000,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": true
+      }
+    },
+    {
+      "provider": "test",
+      "model": "cheap",
+      "_comment": "Deterministic fixture: exactly 10x cheaper than test::premium.",
+      "input_per_million": "1.00",
+      "output_per_million": "3.00",
+      "cached_input_per_million": "0.50",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 200000,
+        "max_output_tokens": 32000,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": false
+      }
+    },
+    {
+      "provider": "test",
+      "model": "incapable",
+      "_comment": "Cheapest of all, but tool-incapable and small-context. Exists to prove routing refuses a fallback that is cheaper yet unfit.",
+      "input_per_million": "0.10",
+      "output_per_million": "0.30",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 8000,
+        "max_output_tokens": 2000,
+        "supports_tools": false,
+        "supports_structured_output": false,
+        "supports_vision": false,
+        "supports_reasoning": false
+      }
+    },
+
+    {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "verified_at": "2026-01-01",
+      "input_per_million": "2.50",
+      "cached_input_per_million": "1.25",
+      "output_per_million": "10.00",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 128000,
+        "max_output_tokens": 16384,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": false
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "verified_at": "2026-01-01",
+      "input_per_million": "0.15",
+      "cached_input_per_million": "0.075",
+      "output_per_million": "0.60",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 128000,
+        "max_output_tokens": 16384,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": false
+      }
+    },
+
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5",
+      "verified_at": "2026-01-01",
+      "input_per_million": "3.00",
+      "cached_input_per_million": "0.30",
+      "cache_write_per_million": "3.75",
+      "output_per_million": "15.00",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 200000,
+        "max_output_tokens": 64000,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": true
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "verified_at": "2026-01-01",
+      "input_per_million": "1.00",
+      "cached_input_per_million": "0.10",
+      "cache_write_per_million": "1.25",
+      "output_per_million": "5.00",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 200000,
+        "max_output_tokens": 64000,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": true
+      }
+    },
+
+    {
+      "provider": "bedrock",
+      "model": "amazon.nova-pro-v1:0",
+      "verified_at": "2026-01-01",
+      "input_per_million": "0.80",
+      "cached_input_per_million": "0.20",
+      "output_per_million": "3.20",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 300000,
+        "max_output_tokens": 10000,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": false
+      }
+    },
+    {
+      "provider": "bedrock",
+      "model": "amazon.nova-lite-v1:0",
+      "verified_at": "2026-01-01",
+      "input_per_million": "0.06",
+      "cached_input_per_million": "0.015",
+      "output_per_million": "0.24",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 300000,
+        "max_output_tokens": 10000,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+# Local development stack.
+#
+# Runs the gateway against DynamoDB Local, so the full reserve/reconcile
+# lifecycle is exercised against real DynamoDB semantics -- including genuine
+# TransactionConflict, which the in-process mock never produces -- without an
+# AWS account or a cent of spend.
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:2.5.2
+    # -inMemory keeps everything in RAM: fast, and every restart is a clean
+    # slate, which is what you want locally and never in production.
+    command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000 >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bootstrap:
+    image: amazon/aws-cli:2.17.0
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./infra:/infra:ro
+      - ./scripts:/scripts:ro
+    entrypoint: ["/bin/sh", "/scripts/create-local-tables.sh"]
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8000"
+    environment:
+      ABC_ENVIRONMENT: local
+      ABC_LOG_LEVEL: DEBUG
+      ABC_AWS_REGION: us-east-1
+      ABC_DYNAMODB_ENDPOINT_URL: http://dynamodb:8000
+      ABC_TABLE_CORE: abc_core
+      ABC_TABLE_LEDGER: abc_ledger
+      ABC_DEFAULT_MAX_OUTPUT_TOKENS: "1000"
+      # DynamoDB Local accepts any credentials, but boto3 insists on finding some.
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      # Provider keys come from your gitignored .env, never from this file.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ABC_ADMIN_API_KEY: ${ABC_ADMIN_API_KEY:-local-admin-key}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
