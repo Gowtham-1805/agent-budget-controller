@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     # Read without the ABC_ prefix, matching each provider's own convention.
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
     bedrock_enabled: bool = False
     bedrock_region: str = "us-east-1"
     #: Register the deterministic fake provider under the name "test".

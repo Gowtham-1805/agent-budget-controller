@@ -1,6 +1,6 @@
 """Provider configuration registry and lifecycle management.
 
-Manages configuration for LLM providers (OpenAI, Bedrock, Anthropic, Test),
+Manages configuration for LLM providers (OpenAI, Bedrock, Anthropic, Gemini, Test),
 maintains secure in-memory secret references (never returned in responses or logs),
 and dynamically instantiates and tests provider adapters.
 """
@@ -42,6 +42,12 @@ SUPPORTED_PROVIDERS: dict[str, dict[str, Any]] = {
     "anthropic": {
         "display_name": "Anthropic",
         "default_model": "claude-sonnet-4-5",
+        "auth_type": ProviderAuthType.API_KEY,
+        "is_production_ready": True,
+    },
+    "gemini": {
+        "display_name": "Google Gemini",
+        "default_model": "gemini-2.5-flash",
         "auth_type": ProviderAuthType.API_KEY,
         "is_production_ready": True,
     },
@@ -113,7 +119,23 @@ class ProviderRegistry:
             is_production_ready=True,
         )
 
-        # 4. Test provider
+        # 4. Gemini
+        gemini_key = getattr(self.settings, "gemini_api_key", None)
+        gemini_configured = bool(gemini_key)
+        if gemini_key:
+            self._secrets["gemini"] = gemini_key
+        self._configs["gemini"] = ProviderConfig(
+            provider="gemini",
+            display_name="Google Gemini",
+            enabled=gemini_configured,
+            configured=gemini_configured,
+            default_model="gemini-2.5-flash",
+            auth_type=ProviderAuthType.API_KEY,
+            masked_api_key=mask_secret(gemini_key) if gemini_key else None,
+            is_production_ready=True,
+        )
+
+        # 5. Test provider
         test_enabled = getattr(self.settings, "enable_fake_provider", False)
         self._configs["test"] = ProviderConfig(
             provider="test",
@@ -131,7 +153,11 @@ class ProviderRegistry:
 
     def list_providers(self) -> list[ProviderConfig]:
         """Return all provider configurations with masked secrets."""
-        return [self._configs[p] for p in ("openai", "bedrock", "anthropic", "test") if p in self._configs]
+        return [
+            self._configs[p]
+            for p in ("openai", "bedrock", "anthropic", "gemini", "test")
+            if p in self._configs
+        ]
 
     def get_provider(self, provider_id: str) -> ProviderConfig | None:
         return self._configs.get(provider_id.lower())
@@ -371,7 +397,7 @@ class ProviderRegistry:
             )
 
     def _rebuild_all_adapters(self) -> None:
-        for provider_id in ("openai", "bedrock", "anthropic", "test"):
+        for provider_id in ("openai", "bedrock", "anthropic", "gemini", "test"):
             self._rebuild_adapter(provider_id)
 
     def _rebuild_adapter(self, provider_id: str) -> None:
@@ -411,6 +437,19 @@ class ProviderRegistry:
             from .anthropic_adapter import AnthropicAdapter
 
             return AnthropicAdapter(api_key=secret, catalog=self.catalog)
+
+        elif provider_id == "gemini":
+            secret = self._secrets.get("gemini")
+            if not secret:
+                return None
+            from .gemini_adapter import DEFAULT_BASE_URL as GEMINI_BASE_URL
+            from .gemini_adapter import GeminiAdapter
+
+            return GeminiAdapter(
+                api_key=secret,
+                catalog=self.catalog,
+                base_url=cfg.base_url or GEMINI_BASE_URL,
+            )
 
         elif provider_id == "bedrock":
             from .bedrock_adapter import BedrockAdapter

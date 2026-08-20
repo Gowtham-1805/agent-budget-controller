@@ -45,7 +45,7 @@ export default async function ProvidersSettingsPage() {
         <div>
           <h1 className="page-title">Provider Adapters &amp; Model Pricing Catalog</h1>
           <p className="page-description">
-            Configure, test, and govern real LLM providers (Amazon Bedrock, OpenAI, Anthropic) and deterministic test doubles against pinned pricing.
+            Configure, test, and govern real LLM providers (Amazon Bedrock, OpenAI, Anthropic, Google Gemini) and deterministic test doubles against pinned pricing.
           </p>
         </div>
 
@@ -69,7 +69,7 @@ export default async function ProvidersSettingsPage() {
         <div className="notice-box warning">
           <AlertCircleIcon size={16} />
           <div>
-            <strong>Development Test Double Active:</strong> The gateway is currently operating with the deterministic local test double. Connect Amazon Bedrock (via IAM) or OpenAI / Anthropic (via API Key) below to route production inference.
+            <strong>Development Test Double Active:</strong> The gateway is currently operating with the deterministic local test double. Connect Amazon Bedrock (via IAM) or OpenAI / Anthropic / Google Gemini (via API Key) below to route production inference.
           </div>
         </div>
       )}

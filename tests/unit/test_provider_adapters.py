@@ -25,6 +25,7 @@ from abc_gateway.providers.base import (
     Timeouts,
 )
 from abc_gateway.providers.classify import classify_exception, classify_http_error
+from abc_gateway.providers.gemini_adapter import GeminiAdapter
 from abc_gateway.providers.openai_adapter import OpenAIAdapter
 
 
@@ -275,6 +276,149 @@ class TestAnthropicAdapter:
             correlation_id="req-1",
         )
         assert isinstance(outcome, FailedAmbiguous)
+
+
+class TestGeminiAdapter:
+    async def test_sends_max_output_tokens_in_generation_config(self, catalog) -> None:
+        captured: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            import json
+
+            captured.update(json.loads(request.content))
+            return httpx.Response(200, json=_gemini_response())
+
+        adapter = GeminiAdapter(api_key="k", catalog=catalog, client=transport(handler))
+        await adapter.invoke(
+            chat(),
+            "gemini-2.5-flash",
+            max_output_tokens=256,
+            timeouts=Timeouts(),
+            correlation_id="req-1",
+        )
+        assert captured["generationConfig"]["maxOutputTokens"] == 256
+
+    async def test_thinking_tokens_are_added_to_the_output_total(self, catalog) -> None:
+        """The most important assertion for this adapter.
+
+        Gemini reports thoughtsTokenCount *outside* candidatesTokenCount and
+        bills both at the output rate. Passing candidatesTokenCount through
+        alone would understate output on every thinking request -- the exact
+        mirror of the Anthropic cache trap, in the opposite direction.
+        """
+        adapter = GeminiAdapter(
+            api_key="k",
+            catalog=catalog,
+            client=transport(lambda r: httpx.Response(200, json=_gemini_response())),
+        )
+        outcome = await adapter.invoke(
+            chat(),
+            "gemini-2.5-flash",
+            max_output_tokens=256,
+            timeouts=Timeouts(),
+            correlation_id="req-1",
+        )
+
+        assert isinstance(outcome, Succeeded)
+        # 300 visible + 120 thinking, both billed as output.
+        assert outcome.usage.output_tokens == 420
+        assert outcome.usage.reasoning_tokens == 120
+        # Cached input is already a subset of promptTokenCount here.
+        assert outcome.usage.input_tokens == 1000
+        assert outcome.usage.cached_input_tokens == 800
+
+        norm = NormalizedUsage.from_provider(outcome.usage)
+        assert norm.uncached_input_tokens == 200
+
+    async def test_the_assistant_role_is_mapped_to_model(self, catalog) -> None:
+        """Gemini rejects "assistant" as an invalid role."""
+        captured: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            import json
+
+            captured.update(json.loads(request.content))
+            return httpx.Response(200, json=_gemini_response())
+
+        adapter = GeminiAdapter(api_key="k", catalog=catalog, client=transport(handler))
+        request = ChatRequest(
+            messages=(ChatMessage("user", "hi"), ChatMessage("assistant", "hello")),
+            model="gemini-2.5-flash",
+        )
+        await adapter.invoke(
+            request,
+            "gemini-2.5-flash",
+            max_output_tokens=64,
+            timeouts=Timeouts(),
+            correlation_id="req-1",
+        )
+        assert [c["role"] for c in captured["contents"]] == ["user", "model"]
+
+    async def test_uses_the_providers_count_tokens_endpoint(self, catalog) -> None:
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.path)
+            return httpx.Response(200, json={"totalTokens": 1234})
+
+        adapter = GeminiAdapter(api_key="k", catalog=catalog, client=transport(handler))
+        count = await adapter.count_input_tokens(chat(), "gemini-2.5-flash")
+
+        assert ":countTokens" in seen[0]
+        assert count >= 1234
+
+    async def test_falls_back_when_counting_is_unavailable(self, catalog) -> None:
+        """A preflight outage must not become a spend-control outage."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("down")
+
+        adapter = GeminiAdapter(api_key="k", catalog=catalog, client=transport(handler))
+        count = await adapter.count_input_tokens(chat(), "gemini-2.5-flash")
+        assert count > 0
+
+    async def test_a_read_timeout_holds_the_reservation(self, catalog) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("slow")
+
+        adapter = GeminiAdapter(api_key="k", catalog=catalog, client=transport(handler))
+        outcome = await adapter.invoke(
+            chat(),
+            "gemini-2.5-flash",
+            max_output_tokens=256,
+            timeouts=Timeouts(),
+            correlation_id="req-1",
+        )
+        assert isinstance(outcome, FailedAmbiguous)
+
+    def test_the_output_cap_is_not_treated_as_hard(self, catalog) -> None:
+        """maxOutputTokens bounds the visible completion, not thinking.
+
+        If this flips to True the routing engine stops adding its overshoot
+        margin, and every 2.5 reservation starts understating the true cost.
+        """
+        assert catalog.get("gemini", "gemini-2.5-pro").capabilities.supports_hard_output_cap is False
+
+    def test_long_prompts_are_priced_at_the_tiered_rate(self, catalog) -> None:
+        """Gemini 2.5 Pro bills 2x input / 1.5x output above 200k tokens."""
+        price = catalog.get("gemini", "gemini-2.5-pro")
+        short = price.estimate_worst_case(1_000, 1_000)
+        long = price.estimate_worst_case(200_001, 1_000)
+        # Same output shape, but the long prompt crosses the threshold.
+        assert long.input_cost.nano > short.input_cost.nano * 200
+
+
+def _gemini_response() -> dict:
+    return {
+        "responseId": "resp_1",
+        "candidates": [{"content": {"parts": [{"text": "hi"}], "role": "model"}}],
+        "usageMetadata": {
+            "promptTokenCount": 1000,
+            "cachedContentTokenCount": 800,
+            "candidatesTokenCount": 300,
+            "thoughtsTokenCount": 120,
+        },
+    }
 
 
 def _openai_response() -> dict:

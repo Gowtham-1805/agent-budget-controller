@@ -31,6 +31,7 @@ PRICING_PAGES = {
     "openai": "https://openai.com/api/pricing/",
     "anthropic": "https://www.anthropic.com/pricing#api",
     "bedrock": "https://aws.amazon.com/bedrock/pricing/",
+    "gemini": "https://ai.google.dev/gemini-api/docs/pricing",
 }
 
 

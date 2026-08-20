@@ -1,6 +1,6 @@
 {
-  "version": "2026-08-19.1",
-  "published_at": "2026-08-19T00:00:00Z",
+  "version": "2026-08-20.1",
+  "published_at": "2026-08-20T00:00:00Z",
   "_README": [
     "Prices are expressed in USD per MILLION tokens, as decimal STRINGS.",
     "Strings, not JSON numbers: a float literal has already lost precision",
@@ -174,6 +174,76 @@
         "supports_structured_output": true,
         "supports_vision": true,
         "supports_reasoning": false
+      }
+    },
+
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-pro",
+      "_comment": [
+        "Tiered pricing: prompts over 200k tokens are billed at 2x input and",
+        "1.5x output, expressed here as long_context multipliers rather than a",
+        "second catalog entry, so one model stays one price key.",
+        "",
+        "supports_hard_output_cap is FALSE on every Gemini 2.5 entry, and that",
+        "is deliberate. maxOutputTokens bounds candidatesTokenCount only --",
+        "thinking tokens are reported separately as thoughtsTokenCount and are",
+        "billed at the output rate. 2.5 Pro cannot disable thinking, so the cap",
+        "does not bound the true cost and the engine must add its overshoot",
+        "margin. Setting this true would make the reservation understate spend."
+      ],
+      "verified_at": "2026-01-01",
+      "input_per_million": "1.25",
+      "cached_input_per_million": "0.31",
+      "output_per_million": "10.00",
+      "long_context_threshold": 200000,
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 1048576,
+        "max_output_tokens": 65536,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": true,
+        "supports_hard_output_cap": false
+      }
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "verified_at": "2026-01-01",
+      "input_per_million": "0.30",
+      "cached_input_per_million": "0.075",
+      "output_per_million": "2.50",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 1048576,
+        "max_output_tokens": 65536,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": true,
+        "supports_hard_output_cap": false
+      }
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-flash-lite",
+      "verified_at": "2026-01-01",
+      "input_per_million": "0.10",
+      "cached_input_per_million": "0.025",
+      "output_per_million": "0.40",
+      "status": "ACTIVE",
+      "capabilities": {
+        "max_context_tokens": 1048576,
+        "max_output_tokens": 65536,
+        "supports_tools": true,
+        "supports_structured_output": true,
+        "supports_vision": true,
+        "supports_reasoning": true,
+        "supports_hard_output_cap": false
       }
     }
   ]
