@@ -15,6 +15,13 @@ import {
   SettingsIcon,
   SearchIcon,
 } from "./Icons";
+import { useSession } from "@/lib/session-context";
+
+const ROLE_BADGE_CLASS: Record<string, string> = {
+  ADMIN: "badge-ok",
+  OPERATOR: "badge-cyan",
+  VIEWER: "badge",
+};
 
 interface NavItem {
   href: string;
@@ -60,6 +67,7 @@ interface SidebarProps {
 
 export function Sidebar({ onOpenSearch }: SidebarProps) {
   const pathname = usePathname();
+  const session = useSession();
 
   return (
     <aside className="sidebar-container">
@@ -218,7 +226,7 @@ export function Sidebar({ onOpenSearch }: SidebarProps) {
             fontSize: 12,
           }}
         >
-          AG
+          {session.email.charAt(0).toUpperCase()}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -231,20 +239,14 @@ export function Sidebar({ onOpenSearch }: SidebarProps) {
               whiteSpace: "nowrap",
             }}
           >
-            bootstrap-admin
+            {session.email}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 1 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "9999px",
-                backgroundColor: "var(--ok)",
-                display: "inline-block",
-              }}
-            />
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Memory Store</span>
-          </div>
+          <span
+            className={`badge ${ROLE_BADGE_CLASS[session.role] ?? ""}`}
+            style={{ marginTop: 2, fontSize: 10 }}
+          >
+            {session.role}
+          </span>
         </div>
       </div>
     </aside>

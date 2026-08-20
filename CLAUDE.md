@@ -30,8 +30,13 @@ These are not style preferences. Each one exists because relaxing it either
 reintroduces a race condition or silently corrupts the books.
 
 1. **Never use `float` for money.** `Money` (`domain/money.py`) is integer
-   nano-USD. `Decimal` is used in exactly one place — `pricing/loader.py` — to
-   parse the catalog file. Nowhere else.
+   nano-USD. `Decimal` appears only at parsing/serialization boundaries —
+   `pricing/loader.py` (parsing the catalog file), `money.py`'s
+   `from_usd_str`/`to_usd_str` (display and input parsing), and
+   `repo/dynamo/serde.py` / `repo/items.py` (DynamoDB returns numbers as
+   `Decimal`, converted straight to `int`). It is never used for in-flight
+   money arithmetic or a persisted value, and no `float()` call exists
+   anywhere in `apps/gateway/src`.
 
 2. **Never call a provider before a reservation is granted.** The lifecycle is
    `count → bound → estimate → RESERVE → invoke → reconcile`, always in that
@@ -122,9 +127,10 @@ make test-contract
 
 ## Known state of this repository
 
-- **Not a git repository.** `.gitignore` and `.github/workflows/` exist, but
-  there is no `.git/` — the CI and deploy workflows have never run. Don't
-  assume commits exist; check `git status` first if you need to know.
+- **Is a git repository as of the production-readiness audit.** `.gitignore`
+  and `.github/workflows/` exist and there is now a `.git/` — this line
+  previously said otherwise; check `git status`/`git log` for current truth
+  rather than trusting this note, since repository state changes.
 - **No AWS credentials, no Docker, no `make` binary** on the reference
   development machine. Every documented `make` target has a raw-command
   equivalent in [docs/OPERATIONS.md](docs/OPERATIONS.md).
@@ -139,7 +145,7 @@ make test-contract
 ## Commands
 
 ```bash
-make test              # 214 tests, ~30s, no network, no spend
+make test              # 371 tests, ~35s, no network, no spend
 make check              # lint + typecheck + test
 make run                 # gateway on :8080, in-memory store
 make verify-pricing       # checks real-provider catalog rates for staleness

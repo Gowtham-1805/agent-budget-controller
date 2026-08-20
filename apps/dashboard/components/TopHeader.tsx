@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { TerminalIcon, PlusIcon, ShieldIcon } from "./Icons";
 import { NotificationBell } from "./NotificationBell";
+import { UserMenu } from "./UserMenu";
+import { useSession } from "@/lib/session-context";
 
 const TITLE_MAP: Record<string, { title: string; subtitle: string }> = {
   "/": { title: "Overview", subtitle: "Real-time AI spend, atomic reservations & budget runway" },
@@ -19,6 +21,8 @@ const TITLE_MAP: Record<string, { title: string; subtitle: string }> = {
 
 export function TopHeader() {
   const pathname = usePathname();
+  const session = useSession();
+  const canWrite = session.role === "OPERATOR" || session.role === "ADMIN";
   const current = TITLE_MAP[pathname] || { title: "AgentGuard", subtitle: "Financial Authorization Firewall" };
 
   return (
@@ -49,16 +53,19 @@ export function TopHeader() {
           <span>Test Inference</span>
         </Link>
 
-        <Link
-          href="/agents"
-          className="btn btn-primary btn-sm"
-          style={{ gap: 6 }}
-        >
-          <PlusIcon size={14} />
-          <span>New Agent</span>
-        </Link>
+        {canWrite && (
+          <Link
+            href="/agents"
+            className="btn btn-primary btn-sm"
+            style={{ gap: 6 }}
+          >
+            <PlusIcon size={14} />
+            <span>New Agent</span>
+          </Link>
+        )}
 
         <NotificationBell />
+        <UserMenu />
       </div>
     </header>
   );

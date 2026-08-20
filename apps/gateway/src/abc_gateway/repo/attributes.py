@@ -34,6 +34,11 @@ E_LEDGER_ENTRY: Final = "LEDGER_ENTRY"
 E_AUDIT_EVENT: Final = "AUDIT_EVENT"
 E_ROLLING_BUCKET: Final = "ROLLING_BUCKET"
 E_ROLLING_MARK: Final = "ROLLING_MARK"
+E_USER: Final = "USER"
+E_USER_EMAIL_INDEX: Final = "USER_EMAIL_INDEX"
+E_USER_SESSION: Final = "USER_SESSION"
+E_LOGIN_COUNTER: Final = "LOGIN_COUNTER"
+E_API_KEY: Final = "API_KEY"
 
 # -- budget counters --------------------------------------------------------
 # `remaining_*` is the materialised counter the authorization condition reads.
@@ -92,6 +97,18 @@ STATUS: Final = "status"
 EXPIRES_AT_EPOCH: Final = "expires_at_epoch"
 DISPATCH_STATE: Final = "dispatch_state"
 STATE: Final = "state"
+
+# -- human auth ---------------------------------------------------------
+EMAIL_HASH: Final = "email_hash"
+PASSWORD_HASH: Final = "password_hash"
+ROLE: Final = "role"
+USER_ID: Final = "user_id"
+REVOKED: Final = "revoked"
+ISSUED_AT_EPOCH: Final = "issued_at_epoch"
+LAST_SEEN_EPOCH: Final = "last_seen_epoch"
+FAILED_ATTEMPTS: Final = "failed_attempts"
+LOCKED_UNTIL_EPOCH: Final = "locked_until_epoch"
+WINDOW_STARTED_EPOCH: Final = "window_started_epoch"
 
 #: Groups of counters, so backends iterate the same fields in the same order.
 MONEY_TRIPLE: Final = (REMAINING_NANO, COMMITTED_NANO, RESERVED_NANO)

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { usd } from "../lib/api";
+import { usd } from "../lib/format";
 import type { TeamSummary } from "../lib/types";
 import { BlockTeamModal } from "./BlockTeamModal";
 import { UnblockTeamModal } from "./UnblockTeamModal";

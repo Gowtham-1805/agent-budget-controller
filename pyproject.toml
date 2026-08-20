@@ -27,6 +27,12 @@ dependencies = [
     # "UTC" without this. Billing windows are computed in the tenant's
     # timezone, so it is a hard runtime dependency, not a dev convenience.
     "tzdata==2026.3",
+    # Argon2id for human passwords. Exact pin for the same reason as boto3:
+    # the hash parameters are a security floor, and a floating version could
+    # silently change defaults without a test failing.
+    "argon2-cffi==25.1.0",
+    # Backs pydantic's EmailStr, used to validate the login form server-side.
+    "email-validator==2.3.0",
 ]
 
 [project.optional-dependencies]

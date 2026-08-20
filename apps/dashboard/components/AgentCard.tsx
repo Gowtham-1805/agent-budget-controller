@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { tokens, usd } from "../lib/api";
+import { tokens, usd } from "../lib/format";
 import type { AgentSummary } from "../lib/types";
 import { EditAgentBudgetModal } from "./EditAgentBudgetModal";
 import { EditModelPolicyModal } from "./EditModelPolicyModal";

@@ -160,3 +160,52 @@ def rolling_bucket_key(tenant_id: str, agent_id: str, minute: str) -> ItemKey:
 def rolling_mark_key(tenant_id: str, entry_id: str) -> ItemKey:
     """Dedup marker for at-least-once stream delivery."""
     return ItemKey(TABLE_CORE, f"{_tenant(tenant_id)}#ROLLMARK#{entry_id}", "MARK")
+
+
+# -- human auth ---------------------------------------------------------
+#
+# The email index is deliberately *not* tenant-prefixed: a login form has an
+# email and a password and no tenant selector, so the tenant must come *out
+# of* the lookup rather than being known in advance. That also makes email
+# uniqueness a global property, which is what one login form implies.
+#
+# Sessions use the ``USERSESSION``/``AUTH#SESSION`` prefixes rather than the
+# existing ``SESSION`` prefix that agent conversation sessions already own
+# (see ``session_pk`` above) -- reusing that prefix would collide with agent
+# sessions in ``list_sessions``'s entity-type scan.
+
+
+def user_key(tenant_id: str, user_id: str) -> ItemKey:
+    return ItemKey(TABLE_CORE, f"{_tenant(tenant_id)}#USER#{user_id}", "PROFILE")
+
+
+def user_email_index_key(email_hash: str) -> ItemKey:
+    return ItemKey(TABLE_CORE, f"AUTH#EMAIL#{email_hash}", "LOOKUP")
+
+
+def auth_session_key(token_hash: str) -> ItemKey:
+    return ItemKey(TABLE_CORE, f"AUTH#SESSION#{token_hash}", "SESSION")
+
+
+def login_counter_key(email_hash: str) -> ItemKey:
+    return ItemKey(TABLE_CORE, f"AUTH#LOGINFAIL#{email_hash}", "COUNTER")
+
+
+def credentials_marker_key() -> ItemKey:
+    """A single fixed item, written once the first user or API key exists.
+
+    Lets ``has_any_credential()`` answer with one bounded ``GetItem`` instead
+    of a table scan on every ``/readyz`` probe.
+    """
+    return ItemKey(TABLE_CORE, "AUTH#CREDENTIALS", "MARKER")
+
+
+def api_key_record_key(key_hash: str) -> ItemKey:
+    """Tenant-less, like the email index and the session key.
+
+    This lookup runs on *every* data-plane request (``get_principal`` resolves
+    a bearer credential on the hot path), so it must be a direct O(1) item
+    get -- never a scan. The tenant is not known until after the record is
+    read; it lives inside the item body, not the key.
+    """
+    return ItemKey(TABLE_CORE, f"AUTH#APIKEY#{key_hash}", "KEY")

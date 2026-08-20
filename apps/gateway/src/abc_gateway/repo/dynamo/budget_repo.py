@@ -18,14 +18,17 @@ from typing import Any
 
 from botocore.exceptions import ClientError
 
+from ...auth.identity import ApiKeyRecord
 from ...domain.agent import AgentState, AgentStatus
 from ...domain.alerts import AlertEvent, threshold_floor
+from ...domain.auth_session import AuthSession
 from ...domain.ledger import UsageLedgerEntry
 from ...domain.money import Money
 from ...domain.policy import AgentPolicy, BudgetPolicy
 from ...domain.scopes import ScopeRef, ScopeType
 from ...domain.session import Session, SessionCloseReason, SessionStatus
 from ...domain.state import BudgetState
+from ...domain.user import UserRecord
 from ...domain.window import BudgetWindow
 from .. import attributes as A
 from .. import keys
@@ -45,6 +48,10 @@ from .client import (
 from .serde import (
     agent_policy_from_item,
     agent_policy_to_item,
+    api_key_record_from_item,
+    api_key_record_to_item,
+    auth_session_from_item,
+    auth_session_to_item,
     budget_policy_from_item,
     budget_policy_to_item,
     ledger_entry_from_item,
@@ -52,6 +59,8 @@ from .serde import (
     plain,
     reservation_from_item,
     txt,
+    user_from_item,
+    user_to_item,
 )
 
 
@@ -729,6 +738,341 @@ class DynamoBudgetRepository:
             return True
         except ClientError:
             return False
+
+    # -- human auth: users ---------------------------------------------
+
+    async def create_user(self, user: UserRecord) -> bool:
+        """Create a user, conditional on the email index item being free.
+
+        Both items are written in one transaction so a partial failure can
+        never leave the index claimed with no matching profile, or vice
+        versa.
+        """
+        user_key = keys.user_key(user.tenant_id, user.user_id)
+        email_key = keys.user_email_index_key(user.email_hash)
+        actions: list[dict[str, Any]] = [
+            {
+                "Put": {
+                    "TableName": self.core_table,
+                    "Item": {
+                        A.PK: txt(email_key.partition_suffix),
+                        A.SK: txt(email_key.sort_key),
+                        A.ENTITY_TYPE: txt(A.E_USER_EMAIL_INDEX),
+                        A.USER_ID: txt(user.user_id),
+                        A.TENANT_ID: txt(user.tenant_id),
+                    },
+                    "ConditionExpression": "attribute_not_exists(#pk)",
+                    "ExpressionAttributeNames": {"#pk": A.PK},
+                }
+            },
+            {
+                "Put": {
+                    "TableName": self.core_table,
+                    "Item": user_to_item(user, user_key),
+                    "ConditionExpression": "attribute_not_exists(#pk)",
+                    "ExpressionAttributeNames": {"#pk": A.PK},
+                }
+            },
+        ]
+        created = await self._try_transaction(actions)
+        if created:
+            await self._mark_credentials_configured()
+        return created
+
+    async def get_user(self, tenant_id: str, user_id: str) -> UserRecord | None:
+        key = keys.user_key(tenant_id, user_id)
+        response = await asyncio.to_thread(
+            self.client.get_item,
+            TableName=self.core_table,
+            Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        return user_from_item(item) if item else None
+
+    async def get_user_by_email_hash(self, email_hash: str) -> UserRecord | None:
+        key = keys.user_email_index_key(email_hash)
+        response = await asyncio.to_thread(
+            self.client.get_item,
+            TableName=self.core_table,
+            Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        if not item:
+            return None
+        flat = plain(item)
+        return await self.get_user(flat[A.TENANT_ID], flat[A.USER_ID])
+
+    async def put_user(self, user: UserRecord) -> None:
+        """Update an existing user. Never touches the email index -- email is
+        immutable once a user is created, so there is nothing to reconcile."""
+        key = keys.user_key(user.tenant_id, user.user_id)
+        await asyncio.to_thread(
+            self.client.put_item,
+            TableName=self.core_table,
+            Item=user_to_item(user, key),
+        )
+
+    async def list_users(self, tenant_id: str) -> tuple[UserRecord, ...]:
+        response = await asyncio.to_thread(
+            self.client.scan,
+            TableName=self.core_table,
+            FilterExpression="#e = :e AND #t = :t",
+            ExpressionAttributeNames={"#e": A.ENTITY_TYPE, "#t": A.TENANT_ID},
+            ExpressionAttributeValues={":e": txt(A.E_USER), ":t": txt(tenant_id)},
+        )
+        return tuple(user_from_item(i) for i in response.get("Items", []))
+
+    # -- durable login throttle (tier 2; auth/ratelimit.py owns tier 1) ----
+
+    async def record_login_failure(
+        self,
+        email_hash: str,
+        *,
+        at_epoch: int,
+        window_seconds: int,
+        lockout_threshold: int,
+        lockout_base_seconds: int,
+        lockout_cap_seconds: int,
+    ) -> tuple[int, int]:
+        """Compare-and-swap loop: DynamoDB condition expressions cannot branch
+        between "reset the window" and "increment it", so the new value is
+        computed in Python from a consistent read and written back
+        conditional on nothing having changed since. A concurrent loser
+        retries against the fresh state -- correct under contention, and
+        login-attempt concurrency for one account is never high enough for
+        the retry bound below to matter in practice."""
+        key = keys.login_counter_key(email_hash)
+        dynamo_key = {A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)}
+
+        for _ in range(10):
+            response = await asyncio.to_thread(
+                self.client.get_item,
+                TableName=self.core_table,
+                Key=dynamo_key,
+                ConsistentRead=True,
+            )
+            existing = response.get("Item")
+            old_window = int(plain(existing).get(A.WINDOW_STARTED_EPOCH, 0)) if existing else 0
+            old_count = int(plain(existing).get(A.FAILED_ATTEMPTS, 0)) if existing else 0
+
+            if existing is None or at_epoch - old_window >= window_seconds:
+                new_count, new_window = 1, at_epoch
+            else:
+                new_count, new_window = old_count + 1, old_window
+
+            locked_until = 0
+            if new_count >= lockout_threshold:
+                backoff = min(
+                    lockout_base_seconds * (2 ** (new_count - lockout_threshold)),
+                    lockout_cap_seconds,
+                )
+                locked_until = at_epoch + backoff
+
+            item = {
+                **dynamo_key,
+                A.ENTITY_TYPE: txt(A.E_LOGIN_COUNTER),
+                A.FAILED_ATTEMPTS: num(new_count),
+                A.WINDOW_STARTED_EPOCH: num(new_window),
+                A.LOCKED_UNTIL_EPOCH: num(locked_until),
+            }
+            try:
+                if existing is None:
+                    await asyncio.to_thread(
+                        self.client.put_item,
+                        TableName=self.core_table,
+                        Item=item,
+                        ConditionExpression="attribute_not_exists(#pk)",
+                        ExpressionAttributeNames={"#pk": A.PK},
+                    )
+                else:
+                    await asyncio.to_thread(
+                        self.client.put_item,
+                        TableName=self.core_table,
+                        Item=item,
+                        ConditionExpression="#w = :ow AND #c = :oc",
+                        ExpressionAttributeNames={
+                            "#w": A.WINDOW_STARTED_EPOCH,
+                            "#c": A.FAILED_ATTEMPTS,
+                        },
+                        ExpressionAttributeValues={
+                            ":ow": num(old_window),
+                            ":oc": num(old_count),
+                        },
+                    )
+                return new_count, locked_until
+            except ClientError as error:
+                if error_code(error) == "ConditionalCheckFailedException":
+                    continue
+                raise
+        raise TransactionConflict(f"record_login_failure: contention on {email_hash[:8]}...")
+
+    async def clear_login_failures(self, email_hash: str) -> None:
+        key = keys.login_counter_key(email_hash)
+        await asyncio.to_thread(
+            self.client.delete_item,
+            TableName=self.core_table,
+            Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+        )
+
+    async def get_login_lockout(self, email_hash: str) -> tuple[int, int]:
+        key = keys.login_counter_key(email_hash)
+        response = await asyncio.to_thread(
+            self.client.get_item,
+            TableName=self.core_table,
+            Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        if not item:
+            return 0, 0
+        flat = plain(item)
+        return int(flat.get(A.FAILED_ATTEMPTS, 0)), int(flat.get(A.LOCKED_UNTIL_EPOCH, 0))
+
+    # -- human auth: sessions --------------------------------------------
+
+    async def put_auth_session(self, session: AuthSession) -> None:
+        key = keys.auth_session_key(session.token_hash)
+        await asyncio.to_thread(
+            self.client.put_item,
+            TableName=self.core_table,
+            Item=auth_session_to_item(session, key),
+        )
+
+    async def get_auth_session(self, token_hash: str) -> AuthSession | None:
+        key = keys.auth_session_key(token_hash)
+        response = await asyncio.to_thread(
+            self.client.get_item,
+            TableName=self.core_table,
+            Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        return auth_session_from_item(item) if item else None
+
+    async def touch_auth_session(self, token_hash: str, *, last_seen_epoch: int) -> None:
+        key = keys.auth_session_key(token_hash)
+        try:
+            await asyncio.to_thread(
+                self.client.update_item,
+                TableName=self.core_table,
+                Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+                UpdateExpression="SET #ls = :ls",
+                ConditionExpression="attribute_exists(#pk)",
+                ExpressionAttributeNames={"#pk": A.PK, "#ls": A.LAST_SEEN_EPOCH},
+                ExpressionAttributeValues={":ls": num(last_seen_epoch)},
+            )
+        except ClientError as error:
+            if error_code(error) == "ConditionalCheckFailedException":
+                return  # the session is already gone; nothing to touch
+            raise
+
+    async def revoke_auth_session(self, token_hash: str) -> bool:
+        key = keys.auth_session_key(token_hash)
+        try:
+            await asyncio.to_thread(
+                self.client.update_item,
+                TableName=self.core_table,
+                Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+                UpdateExpression="SET #r = :true",
+                ConditionExpression="attribute_exists(#pk) AND #r = :false",
+                ExpressionAttributeNames={"#pk": A.PK, "#r": A.REVOKED},
+                ExpressionAttributeValues={":true": {"BOOL": True}, ":false": {"BOOL": False}},
+            )
+            return True
+        except ClientError as error:
+            if error_code(error) == "ConditionalCheckFailedException":
+                return False
+            raise
+
+    async def revoke_user_sessions(
+        self, tenant_id: str, user_id: str, *, except_token_hash: str | None = None
+    ) -> int:
+        """Rare admin/security action, not the hot path -- a scan-and-filter
+        here follows the same convention already used by ``list_sessions``
+        and ``list_agent_policies``."""
+        response = await asyncio.to_thread(
+            self.client.scan,
+            TableName=self.core_table,
+            FilterExpression="#e = :e AND #t = :t AND #u = :u",
+            ExpressionAttributeNames={"#e": A.ENTITY_TYPE, "#t": A.TENANT_ID, "#u": A.USER_ID},
+            ExpressionAttributeValues={
+                ":e": txt(A.E_USER_SESSION),
+                ":t": txt(tenant_id),
+                ":u": txt(user_id),
+            },
+        )
+        count = 0
+        for item in response.get("Items", []):
+            session = auth_session_from_item(item)
+            if session.token_hash == except_token_hash or session.revoked:
+                continue
+            if await self.revoke_auth_session(session.token_hash):
+                count += 1
+        return count
+
+    # -- agent API keys ----------------------------------------------------
+
+    async def put_api_key(self, record: ApiKeyRecord) -> None:
+        key = keys.api_key_record_key(record.key_hash)
+        await asyncio.to_thread(
+            self.client.put_item,
+            TableName=self.core_table,
+            Item=api_key_record_to_item(record, key),
+        )
+        await self._mark_credentials_configured()
+
+    async def get_api_key_by_hash(self, key_hash: str) -> ApiKeyRecord | None:
+        key = keys.api_key_record_key(key_hash)
+        response = await asyncio.to_thread(
+            self.client.get_item,
+            TableName=self.core_table,
+            Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        return api_key_record_from_item(item) if item else None
+
+    async def list_api_keys(self, tenant_id: str) -> tuple[ApiKeyRecord, ...]:
+        response = await asyncio.to_thread(
+            self.client.scan,
+            TableName=self.core_table,
+            FilterExpression="#e = :e AND #t = :t",
+            ExpressionAttributeNames={"#e": A.ENTITY_TYPE, "#t": A.TENANT_ID},
+            ExpressionAttributeValues={":e": txt(A.E_API_KEY), ":t": txt(tenant_id)},
+        )
+        return tuple(api_key_record_from_item(i) for i in response.get("Items", []))
+
+    async def has_any_credential(self) -> bool:
+        key = keys.credentials_marker_key()
+        response = await asyncio.to_thread(
+            self.client.get_item,
+            TableName=self.core_table,
+            Key={A.PK: txt(key.partition_suffix), A.SK: txt(key.sort_key)},
+            ConsistentRead=True,
+        )
+        return "Item" in response
+
+    async def _mark_credentials_configured(self) -> None:
+        """Idempotent write of the readiness marker; failure to create is not
+        an error, only a signal another writer got there first."""
+        key = keys.credentials_marker_key()
+        try:
+            await asyncio.to_thread(
+                self.client.put_item,
+                TableName=self.core_table,
+                Item={
+                    A.PK: txt(key.partition_suffix),
+                    A.SK: txt(key.sort_key),
+                    A.ENTITY_TYPE: txt("CREDENTIALS_MARKER"),
+                },
+                ConditionExpression="attribute_not_exists(#pk)",
+                ExpressionAttributeNames={"#pk": A.PK},
+            )
+        except ClientError as error:
+            if error_code(error) != "ConditionalCheckFailedException":
+                raise
 
     # -- helpers ------------------------------------------------------------
 

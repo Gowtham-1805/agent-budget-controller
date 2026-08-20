@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class Message(BaseModel):
@@ -408,4 +408,68 @@ class PlaygroundRunResponse(BaseModel):
     blocked: bool = False
     block_reason: str | None = None
     provider_calls_made: int = 1
+
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    #: Capped so an unauthenticated caller cannot post a multi-megabyte body
+    #: and force it through Argon2 -- a free CPU-exhaustion primitive without
+    #: this bound, since the hash runs before any other validation could
+    #: reject the request.
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class LoginResponse(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    tenant_id: str
+    expires_at: str
+    #: Returned in the body (in addition to the Set-Cookie header) so the
+    #: dashboard's server-side proxy can forward it as X-ABC-Session on
+    #: subsequent gateway calls without re-parsing its own cookie jar.
+    session_token: str
+    csrf_token: str
+
+
+class SessionIdentityResponse(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    tenant_id: str
+    issued_at: str
+    expires_at: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=8, max_length=1024)
+
+
+class CreateUserRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=1024)
+    role: Literal["VIEWER", "OPERATOR", "ADMIN"] = "VIEWER"
+    display_name: str = ""
+
+
+class UpdateUserRequest(BaseModel):
+    role: Literal["VIEWER", "OPERATOR", "ADMIN"] | None = None
+    status: Literal["ACTIVE", "DISABLED"] | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=1024)
+
+
+class UserResponse(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    status: str
+    tenant_id: str
+    display_name: str
+    created_at: str
 

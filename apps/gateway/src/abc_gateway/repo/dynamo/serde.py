@@ -17,7 +17,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from ...auth.identity import ApiKeyRecord
 from ...domain.agent import RunawayPolicy
+from ...domain.auth_session import AuthSession
 from ...domain.ledger import CostBreakdown, LedgerKind, UsageLedgerEntry
 from ...domain.money import Money
 from ...domain.policy import (
@@ -35,6 +37,7 @@ from ...domain.reservation import (
 )
 from ...domain.scopes import ScopeRef, ScopeType
 from ...domain.tokens import TokenVector
+from ...domain.user import Role, UserRecord, UserStatus
 from ...domain.window import DEFAULT_BILLING_TZ, WindowType
 from .. import attributes as A
 from ..items import SerdeError
@@ -511,4 +514,107 @@ def agent_policy_from_item(item: dict[str, Any]) -> AgentPolicy:
         default_max_output_tokens=int(flat.get("default_max_output_tokens", 4096)),
         runaway=runaway,
         session_ttl_seconds=int(flat.get("session_ttl_seconds", 86_400)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Human auth: users, sessions, agent API keys
+# ---------------------------------------------------------------------------
+
+
+def user_to_item(user: UserRecord, key: ItemKey) -> dict[str, Any]:
+    return {
+        A.PK: txt(key.partition_suffix),
+        A.SK: txt(key.sort_key),
+        A.ENTITY_TYPE: txt(A.E_USER),
+        A.TENANT_ID: txt(user.tenant_id),
+        A.USER_ID: txt(user.user_id),
+        "email": txt(user.email),
+        A.EMAIL_HASH: txt(user.email_hash),
+        A.PASSWORD_HASH: txt(user.password_hash),
+        A.ROLE: txt(user.role.value),
+        A.STATUS: txt(user.status.value),
+        "created_at_epoch": num(int(user.created_at.timestamp())),
+        "password_changed_at_epoch": num(int(user.password_changed_at.timestamp())),
+        "display_name": txt(user.display_name),
+        "mfa_secret_ref": txt(user.mfa_secret_ref) if user.mfa_secret_ref else {"NULL": True},
+    }
+
+
+def user_from_item(item: dict[str, Any]) -> UserRecord:
+    flat = plain(item)
+    return UserRecord(
+        user_id=flat[A.USER_ID],
+        tenant_id=flat[A.TENANT_ID],
+        email=flat["email"],
+        email_hash=flat[A.EMAIL_HASH],
+        password_hash=flat[A.PASSWORD_HASH],
+        role=Role(flat[A.ROLE]),
+        status=UserStatus(flat[A.STATUS]),
+        created_at=datetime.fromtimestamp(flat["created_at_epoch"], tz=UTC),
+        password_changed_at=datetime.fromtimestamp(flat["password_changed_at_epoch"], tz=UTC),
+        display_name=flat.get("display_name", ""),
+        mfa_secret_ref=flat.get("mfa_secret_ref"),
+    )
+
+
+def auth_session_to_item(session: AuthSession, key: ItemKey) -> dict[str, Any]:
+    return {
+        A.PK: txt(key.partition_suffix),
+        A.SK: txt(key.sort_key),
+        A.ENTITY_TYPE: txt(A.E_USER_SESSION),
+        "token_hash": txt(session.token_hash),
+        A.USER_ID: txt(session.user_id),
+        A.TENANT_ID: txt(session.tenant_id),
+        A.ROLE: txt(session.role.value),
+        A.ISSUED_AT_EPOCH: num(int(session.issued_at.timestamp())),
+        A.EXPIRES_AT_EPOCH: num(int(session.expires_at.timestamp())),
+        A.LAST_SEEN_EPOCH: num(int(session.last_seen_at.timestamp())),
+        "csrf_token": txt(session.csrf_token),
+        A.REVOKED: {"BOOL": session.revoked},
+        "created_ip_hash": txt(session.created_ip_hash),
+        "user_agent_fingerprint": txt(session.user_agent_fingerprint),
+    }
+
+
+def auth_session_from_item(item: dict[str, Any]) -> AuthSession:
+    flat = plain(item)
+    return AuthSession(
+        token_hash=flat["token_hash"],
+        user_id=flat[A.USER_ID],
+        tenant_id=flat[A.TENANT_ID],
+        role=Role(flat[A.ROLE]),
+        issued_at=datetime.fromtimestamp(flat[A.ISSUED_AT_EPOCH], tz=UTC),
+        expires_at=datetime.fromtimestamp(flat[A.EXPIRES_AT_EPOCH], tz=UTC),
+        last_seen_at=datetime.fromtimestamp(flat[A.LAST_SEEN_EPOCH], tz=UTC),
+        csrf_token=flat["csrf_token"],
+        revoked=bool(flat.get(A.REVOKED, False)),
+        created_ip_hash=flat.get("created_ip_hash", ""),
+        user_agent_fingerprint=flat.get("user_agent_fingerprint", ""),
+    )
+
+
+def api_key_record_to_item(record: ApiKeyRecord, key: ItemKey) -> dict[str, Any]:
+    return {
+        A.PK: txt(key.partition_suffix),
+        A.SK: txt(key.sort_key),
+        A.ENTITY_TYPE: txt(A.E_API_KEY),
+        "key_id": txt(record.key_id),
+        "key_hash": txt(record.key_hash),
+        A.TENANT_ID: txt(record.tenant_id),
+        "team_id": txt(record.team_id),
+        "agent_id": txt(record.agent_id),
+        "is_admin": {"BOOL": record.is_admin},
+    }
+
+
+def api_key_record_from_item(item: dict[str, Any]) -> ApiKeyRecord:
+    flat = plain(item)
+    return ApiKeyRecord(
+        key_id=flat["key_id"],
+        key_hash=flat["key_hash"],
+        tenant_id=flat[A.TENANT_ID],
+        team_id=flat["team_id"],
+        agent_id=flat["agent_id"],
+        is_admin=bool(flat.get("is_admin", False)),
     )

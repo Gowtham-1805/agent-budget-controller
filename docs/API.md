@@ -16,23 +16,64 @@ useful for reading offline or diffing against a deployment.
 
 ## Authentication
 
-Every route except `/healthz` and `/readyz` requires a bearer credential:
+Every route except `/healthz` and `/readyz` requires a credential — either a
+bearer API key (an agent, or the bootstrap admin key):
 
 ```
 Authorization: Bearer <key>
 ```
 
-Identity (`tenant → team → agent`) is resolved **server-side** from this
-credential — no request field is ever trusted to say who the caller is. See
+or a human session, carried as a cookie (`abc_dash_session`) or, for the
+dashboard's own server-side proxy, an `X-ABC-Session` header. Identity
+(`tenant → team → agent` for a key, `tenant → user → role` for a session) is
+resolved **server-side** from this credential — no request field is ever
+trusted to say who the caller is. See
 [DECISIONS.md #D10](DECISIONS.md#d10-a-caller-never-asserts-its-own-identity).
 
-| Credential kind | Can do |
-|---|---|
-| **Admin** (`ABC_ADMIN_API_KEY`, or issued with `is_admin=true`) | Everything: control plane, admin actions, and inference as itself |
-| **Agent** (issued via `POST /v1/agents/{agent_id}/keys`) | Inference and session management as that one agent only |
+A session presented on a mutating (non-GET/HEAD) request via the cookie also
+needs a matching `X-ABC-CSRF` header (double-submit against the non-HttpOnly
+`abc_dash_csrf` cookie set at login) — not required when the session arrives
+via `X-ABC-Session`, since a custom header cannot be attached to a request by
+a third-party page the way a cookie is attached automatically.
 
-Admin-only routes call `principal.require_admin()` and return `403` for a
-non-admin credential.
+### Roles
+
+Ordered `AGENT < VIEWER < OPERATOR < ADMIN`. Every check is "at least this
+role", never "exactly this role". A human session's `subject_kind` is
+`"user"` and it always carries `agent_id=""`, so it can never reach the data
+plane (`/v1/chat/completions`, `/v1/responses`) regardless of role — those
+require `subject_kind == "agent"`.
+
+| Role | Can do |
+|---|---|
+| **AGENT** (an issued API key, or the bootstrap `ABC_ADMIN_API_KEY` with `is_admin=true`) | Inference and session management as that one agent (or, for the admin key, everything) |
+| **VIEWER** | Read the control plane: teams, agents, sessions, events, ledger, providers, catalog |
+| **OPERATOR** | VIEWER, plus create/update teams and agents, routing policy, and the Playground |
+| **ADMIN** | Everything: pause/resume, mint agent keys, provider secrets, audit log, user management |
+
+A route's handler calls `principal.require_role(Role.X)` (or
+`principal.require_agent()` on the data plane); a caller below the floor gets
+`403`.
+
+---
+
+## Human authentication (`/v1/auth/*`)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| `POST` | `/v1/auth/login` | none | `{email, password}` → sets session + CSRF cookies. Every failure mode (unknown email, wrong password, locked account) returns the identical generic `401` — see [DECISIONS.md](DECISIONS.md) and `auth/sessions.py`. |
+| `POST` | `/v1/auth/logout` | session | Revokes the session; `204`. |
+| `GET` | `/v1/auth/session` | session | Returns the caller's own identity. |
+| `POST` | `/v1/auth/password` | session | Change password; revokes every other session for the account. |
+| `POST` | `/v1/auth/admin/users` | ADMIN | Create a user. |
+| `GET` | `/v1/auth/admin/users` | ADMIN | List users in the caller's tenant. |
+| `PATCH` | `/v1/auth/admin/users/{user_id}` | ADMIN | Update role/status/password; revokes the user's sessions. |
+| `POST` | `/v1/auth/admin/users/{user_id}/unlock` | ADMIN | Clear a durable login-failure lockout. |
+| `DELETE` | `/v1/auth/admin/users/{user_id}/sessions` | ADMIN | Revoke every session for a user. |
+
+Password reset by email and MFA are deliberately out of scope for now — no
+SMTP client or second-factor enrolment flow exists; account recovery is
+covered by an admin-set password via `PATCH .../admin/users/{user_id}`.
 
 ---
 

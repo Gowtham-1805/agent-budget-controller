@@ -29,10 +29,14 @@ from ..domain.scopes import ScopeRef, ScopeType
 from ..domain.session import Session, SessionCloseReason, SessionStatus
 from ..domain.state import BudgetState
 from ..domain.tokens import TokenVector
+from ..domain.user import Role
 from ..domain.window import BudgetWindow, WindowType
+from ..observability.logging import get_logger
 from ..providers.base import ChatMessage, ChatRequest
 from . import schemas as S
 from .deps import Container, get_container, get_principal
+
+logger = get_logger("abc_gateway.routes")
 
 router = APIRouter()
 admin_router = APIRouter(prefix="/v1/admin", tags=["admin"])
@@ -89,6 +93,7 @@ async def chat_completions(
     The provider is reached only if the request's worst-case cost was
     successfully reserved from every applicable budget first.
     """
+    principal.require_agent()
     request_id = request.state.request_id
 
     chat = ChatRequest(
@@ -166,7 +171,7 @@ async def create_team(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> dict[str, Any]:
-    principal.require_admin()
+    principal.require_role(Role.OPERATOR)
     policy = _budget_policy(ScopeType.TEAM, body.team_id, body.budget)
     await container.repository.put_budget_policy(principal.tenant_id, policy)
     return {"team_id": body.team_id, "limit_usd": policy.limit.to_usd_str()}
@@ -179,7 +184,7 @@ async def update_team_budget(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> dict[str, Any]:
-    principal.require_admin()
+    principal.require_role(Role.OPERATOR)
     policy = _budget_policy(ScopeType.TEAM, team_id, body)
     await container.repository.put_budget_policy(principal.tenant_id, policy)
     return {"team_id": team_id, "limit_usd": policy.limit.to_usd_str()}
@@ -191,7 +196,7 @@ async def create_agent(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> dict[str, Any]:
-    principal.require_admin()
+    principal.require_role(Role.OPERATOR)
     policy = _agent_policy(principal.tenant_id, body)
     await container.repository.put_agent_policy(policy)
 
@@ -215,7 +220,7 @@ async def update_agent_budget(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> dict[str, Any]:
-    principal.require_admin()
+    principal.require_role(Role.OPERATOR)
     existing = await container.repository.get_agent_policy(principal.tenant_id, agent_id)
     if existing is None:
         raise LookupError(f"unknown agent: {agent_id}")
@@ -255,6 +260,11 @@ async def issue_agent_key(
         team_id=policy.team_id,
         agent_id=agent_id,
     )
+    # Persist through to the repository as well as the in-process cache: an
+    # in-memory-only registration is silently lost on the next restart or
+    # rolling deploy, which previously meant every minted key had a hidden
+    # expiry nobody configured.
+    await container.identity.persist(record)
     return {
         "agent_id": agent_id,
         "key_id": record.key_id,
@@ -270,7 +280,7 @@ async def update_routing_policy(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> dict[str, Any]:
-    principal.require_admin()
+    principal.require_role(Role.OPERATOR)
     existing = await container.repository.get_agent_policy(principal.tenant_id, agent_id)
     if existing is None:
         raise LookupError(f"unknown agent: {agent_id}")
@@ -287,7 +297,7 @@ async def list_teams(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> list[S.TeamSummaryResponse]:
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     team_policies = await container.repository.list_budget_policies(
         principal.tenant_id, ScopeType.TEAM
     )
@@ -333,7 +343,7 @@ async def get_team(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> S.TeamSummaryResponse:
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     policy = await container.repository.get_budget_policy(
         principal.tenant_id, ScopeRef.team(team_id)
     )
@@ -376,7 +386,7 @@ async def list_agents(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> list[S.AgentSummaryResponse]:
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     agent_policies = await container.repository.list_agent_policies(principal.tenant_id)
     return [
         await _build_agent_summary(principal.tenant_id, p, container)
@@ -390,7 +400,7 @@ async def get_agent(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> S.AgentSummaryResponse:
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     policy = await container.repository.get_agent_policy(principal.tenant_id, agent_id)
     if policy is None:
         raise LookupError(f"unknown agent: {agent_id}")
@@ -403,7 +413,7 @@ async def list_events(
     container: Container = Depends(get_container),
     limit: int = Query(default=100, le=500),
 ) -> list[S.EventItemResponse]:
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     alerts = await container.repository.list_alerts(principal.tenant_id, limit=limit)
     audits = await container.repository.get_audit_events(principal.tenant_id)
 
@@ -456,7 +466,7 @@ async def playground_chat(
     container: Container = Depends(get_container),
 ) -> S.PlaygroundRunResponse:
     """Execute a test chat request with real-time step-by-step governance tracing."""
-    principal.require_admin()
+    principal.require_role(Role.OPERATOR)
     policy = await container.repository.get_agent_policy(principal.tenant_id, body.agent_id)
     if policy is None:
         raise LookupError(f"unknown agent: {body.agent_id}")
@@ -566,6 +576,7 @@ async def playground_chat(
     )
 
     from ..domain.errors import AuthorizationDenied, DenialCode
+    from .service import ProviderRejected, ProviderUnresolved
 
     try:
         result = await container.service.invoke(
@@ -724,13 +735,15 @@ async def playground_chat(
             block_reason=f"{denial.code.value}: {denial.detail or denial.blocking_scope}",
             provider_calls_made=0,
         )
-    except Exception as exc:
-        err_msg = str(exc)
+    except ProviderRejected as exc:
+        # FailedNotBilled: providers/classify.py's explicit allow-list proved the
+        # provider did not charge us, so the engine already released the hold.
+        err_msg = exc.error
         steps.append(
             S.PlaygroundLifecycleStep(
                 step_number=8,
                 name="Provider Inference",
-                description=f"PROVIDER ERROR: {err_msg}",
+                description=f"PROVIDER REJECTED (proven not billed): {err_msg}",
                 status="blocked",
                 details={"error": err_msg},
             )
@@ -739,7 +752,7 @@ async def playground_chat(
             S.PlaygroundLifecycleStep(
                 step_number=10,
                 name="Reconciliation & Ledger Recording",
-                description="Released budget reservation after provider failure. Zero spend billed.",
+                description="Reservation released — the provider proved it did not bill this request.",
                 status="completed",
             )
         )
@@ -747,7 +760,7 @@ async def playground_chat(
         return S.PlaygroundRunResponse(
             request_id=request_id,
             agent_id=body.agent_id,
-            decision="PROVIDER_ERROR",
+            decision="PROVIDER_REJECTED",
             status="502 Bad Gateway",
             requested_model=policy.routing.preferred.model,
             effective_model=policy.routing.preferred.model,
@@ -760,14 +773,121 @@ async def playground_chat(
             estimated_cost_usd="0.000000",
             actual_cost_usd="0.000000",
             response_text=(
-                f"PROVIDER DISPATCH ERROR: {err_msg}\n\n"
+                f"PROVIDER REJECTED: {err_msg}\n\n"
+                "Zero spend was billed — the reservation was released.\n\n"
                 "Tip: If you are using OpenAI/Anthropic/Bedrock, make sure a valid API key is set in 'Providers' settings. "
                 "For local testing without live API keys, select an agent routed to the 'test' provider."
             ),
             lifecycle_steps=steps,
             blocked=True,
-            block_reason=f"Provider Error: {err_msg}",
+            block_reason=f"Provider rejected (not billed): {err_msg}",
             provider_calls_made=1,
+        )
+
+    except ProviderUnresolved as exc:
+        # FailedAmbiguous (rule 3): the outcome is unknown -- a read timeout does
+        # not prove the provider didn't bill us. The engine already marked the
+        # reservation RECONCILE_PENDING and deliberately did NOT release it, so
+        # this response must not claim the money was returned or that spend was
+        # zero -- either claim would misrepresent held funds as available.
+        err_msg = exc.error
+        reservation = await container.repository.get_reservation(
+            principal.tenant_id, exc.reservation_id
+        )
+        held_usd = reservation.reserved_cost.to_usd_str() if reservation else "unknown"
+        steps.append(
+            S.PlaygroundLifecycleStep(
+                step_number=8,
+                name="Provider Inference",
+                description=f"PROVIDER OUTCOME UNKNOWN: {err_msg}",
+                status="blocked",
+                details={"error": err_msg, "reservation_id": exc.reservation_id},
+            )
+        )
+        steps.append(
+            S.PlaygroundLifecycleStep(
+                step_number=10,
+                name="Reconciliation & Ledger Recording",
+                description=(
+                    f"Outcome ambiguous (e.g. a timeout) -- ${held_usd} remains HELD as "
+                    "RECONCILE_PENDING, not released, because the provider's outcome cannot "
+                    "be proven. It requires manual reconciliation."
+                ),
+                status="pending",
+            )
+        )
+
+        return S.PlaygroundRunResponse(
+            request_id=request_id,
+            agent_id=body.agent_id,
+            decision="PROVIDER_AMBIGUOUS",
+            status="202 Accepted (Pending Reconciliation)",
+            requested_model=policy.routing.preferred.model,
+            effective_model=policy.routing.preferred.model,
+            substituted=False,
+            preflight_input_tokens=prompt_tokens,
+            actual_input_tokens=0,
+            reserved_output_tokens=output_ceiling,
+            actual_output_tokens=0,
+            total_tokens=0,
+            estimated_cost_usd=held_usd,
+            actual_cost_usd="pending",
+            response_text=(
+                f"PROVIDER OUTCOME UNKNOWN: {err_msg}\n\n"
+                f"${held_usd} remains held as RECONCILE_PENDING because the provider's outcome "
+                "could not be confirmed -- this request may still be billed. It has NOT been "
+                "released and requires manual reconciliation."
+            ),
+            lifecycle_steps=steps,
+            blocked=True,
+            block_reason=f"Provider outcome ambiguous, reservation held pending: {err_msg}",
+            provider_calls_made=1,
+        )
+
+    except Exception:
+        # Anything else (e.g. a missing provider/policy LookupError) happens
+        # before or outside the reserve/invoke/reconcile lifecycle -- log the
+        # real detail server-side, but never hand a raw exception string to the
+        # browser: it can leak internal library/stack detail.
+        logger.exception(
+            "playground.unexpected_error",
+            request_id=request_id,
+            agent_id=body.agent_id,
+            tenant_id=principal.tenant_id,
+        )
+        steps.append(
+            S.PlaygroundLifecycleStep(
+                step_number=8,
+                name="Provider Inference",
+                description="UNEXPECTED ERROR before dispatch. See server logs for detail.",
+                status="blocked",
+                details={"request_id": request_id},
+            )
+        )
+
+        return S.PlaygroundRunResponse(
+            request_id=request_id,
+            agent_id=body.agent_id,
+            decision="INTERNAL_ERROR",
+            status="500 Internal Server Error",
+            requested_model=policy.routing.preferred.model,
+            effective_model=policy.routing.preferred.model,
+            substituted=False,
+            preflight_input_tokens=prompt_tokens,
+            actual_input_tokens=0,
+            reserved_output_tokens=output_ceiling,
+            actual_output_tokens=0,
+            total_tokens=0,
+            estimated_cost_usd="0.000000",
+            actual_cost_usd="0.000000",
+            response_text=(
+                "An unexpected error occurred before the request could be dispatched. "
+                f"No provider was contacted. Reference request_id={request_id} in the server logs."
+            ),
+            lifecycle_steps=steps,
+            blocked=True,
+            block_reason=f"Internal error (request_id={request_id})",
+            provider_calls_made=0,
         )
 
 
@@ -859,7 +979,7 @@ async def list_sessions(
     agent_id: str | None = Query(default=None),
     limit: int = Query(default=100, le=500),
 ) -> list[S.SessionResponse]:
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     sessions = await container.repository.list_sessions(
         principal.tenant_id, agent_id=agent_id, limit=limit
     )
@@ -1013,7 +1133,7 @@ async def runaway_events(
     principal: Principal = Depends(get_principal),
     container: Container = Depends(get_container),
 ) -> dict[str, Any]:
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     events = await container.review.runaway_events(principal.tenant_id, agent_id)
     return {"agent_id": agent_id, "events": [_event_dict(e) for e in events]}
 
@@ -1038,7 +1158,7 @@ async def list_providers(
     container: Container = Depends(get_container),
 ) -> list[S.ProviderConfigResponse]:
     """List all supported providers with masked metadata and status."""
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     if not container.registry:
         return []
     return [_provider_response(cfg, container.catalog) for cfg in container.registry.list_providers()]
@@ -1051,7 +1171,7 @@ async def get_provider_config(
     container: Container = Depends(get_container),
 ) -> S.ProviderConfigResponse:
     """Get configuration metadata for a single provider. Never returns raw secrets."""
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     if not container.registry:
         raise LookupError("provider registry is not initialized")
     cfg = container.registry.get_provider(provider)
@@ -1209,7 +1329,7 @@ async def list_catalog_models(
     container: Container = Depends(get_container),
 ) -> list[S.CatalogModelResponse]:
     """List all models registered in the price catalog with pricing and capabilities."""
-    principal.require_admin()
+    principal.require_role(Role.VIEWER)
     if not container.registry:
         return []
     models = container.registry.get_catalog_models(provider)

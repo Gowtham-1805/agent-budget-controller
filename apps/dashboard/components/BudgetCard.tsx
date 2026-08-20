@@ -1,6 +1,6 @@
 "use client";
 
-import { tokens, usd } from "../lib/api";
+import { tokens, usd } from "../lib/format";
 import type { BudgetState } from "../lib/types";
 
 export function BudgetCard({ state }: { state: BudgetState }) {

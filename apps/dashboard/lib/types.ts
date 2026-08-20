@@ -252,3 +252,12 @@ export interface PlaygroundRunResponse {
   block_reason?: string | null;
   provider_calls_made: number;
 }
+
+export type Role = "VIEWER" | "OPERATOR" | "ADMIN";
+
+export interface SessionIdentity {
+  user_id: string;
+  email: string;
+  role: Role;
+  tenant_id: string;
+}

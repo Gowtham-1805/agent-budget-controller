@@ -82,6 +82,38 @@ class Settings(BaseSettings):
     #: comes from Secrets Manager.
     admin_api_key: str | None = Field(default=None, alias="ABC_ADMIN_API_KEY")
 
+    #: First-run human admin account. If both are set and no user exists yet,
+    #: one admin user is seeded at startup so there is always a way to log in.
+    bootstrap_admin_email: str | None = Field(default=None, alias="ABC_BOOTSTRAP_ADMIN_EMAIL")
+    bootstrap_admin_password: str | None = Field(
+        default=None, alias="ABC_BOOTSTRAP_ADMIN_PASSWORD"
+    )
+
+    # Argon2id parameters are a security floor, not a tuning knob -- see
+    # auth/passwords.py's production-floor test. Lowered only in tests, via an
+    # explicit Settings(...) override, never by an environment variable, so a
+    # misconfigured deployment cannot silently weaken it.
+    argon2_time_cost: int = 3
+    argon2_memory_cost_kib: int = 65536
+    argon2_parallelism: int = 4
+
+    session_cookie_name: str = "abc_dash_session"
+    session_csrf_cookie_name: str = "abc_dash_csrf"
+    session_ttl_minutes: int = 12 * 60
+    session_idle_timeout_minutes: int = 60
+
+    #: Tier 1 (per-IP) login throttle: attempts allowed per window.
+    login_ip_limit: int = 10
+    login_ip_window_seconds: int = 300
+    #: Tier 2 (per-account, durable) login throttle.
+    login_account_limit: int = 5
+    login_account_window_seconds: int = 900
+    login_account_lockout_cap_seconds: int = 900
+
+    #: Exact origins only -- never "*". Empty means no CORS middleware at all,
+    #: which is correct while the dashboard proxies every call server-side.
+    cors_allowed_origins: list[str] = Field(default_factory=list)
+
     @property
     def is_production(self) -> bool:
         return self.environment.lower() in {"prod", "production"}

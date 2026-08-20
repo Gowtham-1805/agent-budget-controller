@@ -2,10 +2,15 @@
  * Gateway client.
  *
  * Requests are proxied through Next.js route handlers rather than sent from the
- * browser directly, so the admin credential stays server-side. Putting it in
- * the browser would hand every dashboard viewer the ability to rewrite budgets.
+ * browser directly. Every call forwards the *caller's own* session token (via
+ * X-ABC-Session), never a shared admin credential -- the gateway enforces
+ * server-side RBAC on that identity, so if every request carried one static
+ * admin key instead, the role checks on the gateway side would be decorative:
+ * a viewer who found an unguarded route handler, or a bug in a handler's own
+ * checks, would get full admin access regardless.
  */
 
+import { cookies } from "next/headers";
 import type {
   AgentSummary,
   AuditRecord,
@@ -26,7 +31,7 @@ import type {
 const GATEWAY_URL = (
   process.env.GATEWAY_URL ?? "http://localhost:8080"
 ).replace(/\/$/, "");
-const ADMIN_KEY = process.env.ABC_ADMIN_API_KEY ?? "local-admin-key";
+const SESSION_COOKIE = "abc_dash_session";
 
 export class GatewayError extends Error {
   constructor(
@@ -38,10 +43,16 @@ export class GatewayError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (!token) {
+    throw new GatewayError("not authenticated", 401);
+  }
+
   const response = await fetch(`${GATEWAY_URL}${path}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${ADMIN_KEY}`,
+      "X-ABC-Session": token,
       "Content-Type": "application/json",
       ...(init.headers ?? {}),
     },
@@ -320,20 +331,7 @@ export async function getCatalogModels(provider?: string): Promise<CatalogModel[
   return request<CatalogModel[]>(`/v1/admin/catalog/models${qs ? `?${qs}` : ""}`);
 }
 
-// ---------------------------------------------------------------------------
-// Formatters
-// ---------------------------------------------------------------------------
-
-export function usd(value?: string | number | null, decimals = 2): string {
-  if (value === null || value === undefined || value === "") return "$0.00";
-  const n = typeof value === "string" ? Number.parseFloat(value) : Number(value);
-  if (Number.isNaN(n) || !Number.isFinite(n)) return "$0.00";
-  return `$${n.toFixed(decimals)}`;
-}
-
-export function tokens(value?: number | null): string {
-  if (value === null || value === undefined || typeof value !== "number" || Number.isNaN(value)) return "0";
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
-}
+// Formatters (usd, tokens) moved to lib/format.ts -- see that file's
+// docstring for why: this module imports next/headers, which cannot be
+// bundled into a client component, and those two functions are used by
+// several.

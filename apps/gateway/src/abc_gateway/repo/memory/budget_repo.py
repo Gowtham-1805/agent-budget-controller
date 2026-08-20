@@ -8,8 +8,13 @@ network, a container, or an AWS account.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import UTC, datetime
+
+from ...auth.identity import ApiKeyRecord
 from ...domain.agent import AgentState, AgentStatus
 from ...domain.alerts import AlertEvent
+from ...domain.auth_session import AuthSession
 from ...domain.ledger import UsageLedgerEntry
 from ...domain.money import Money
 from ...domain.policy import AgentPolicy, BudgetPolicy
@@ -17,6 +22,7 @@ from ...domain.reservation import RequestReservation
 from ...domain.scopes import ScopeRef, ScopeType
 from ...domain.session import Session, SessionCloseReason, SessionStatus
 from ...domain.state import BudgetState
+from ...domain.user import UserRecord
 from ...domain.window import BudgetWindow
 from .. import attributes as A
 from .. import keys
@@ -391,6 +397,188 @@ class InMemoryBudgetRepository:
 
     async def health_check(self) -> bool:
         return True
+
+    # -- human auth: users ---------------------------------------------
+
+    async def create_user(self, user: UserRecord) -> bool:
+        user_key = keys.user_key(user.tenant_id, user.user_id).as_tuple()
+        email_key = keys.user_email_index_key(user.email_hash).as_tuple()
+        with self.store._lock:
+            if email_key in self.store._items:
+                return False
+            self.store._items[email_key] = {
+                A.ENTITY_TYPE: A.E_USER_EMAIL_INDEX,
+                A.USER_ID: user.user_id,
+                A.TENANT_ID: user.tenant_id,
+            }
+            self.store._items[user_key] = {A.ENTITY_TYPE: A.E_USER, "user": user}
+            self._mark_credentials_configured_locked()
+            return True
+
+    async def get_user(self, tenant_id: str, user_id: str) -> UserRecord | None:
+        item = self.store.get(keys.user_key(tenant_id, user_id).as_tuple())
+        if item is None:
+            return None
+        user: UserRecord = item["user"]
+        return user
+
+    async def get_user_by_email_hash(self, email_hash: str) -> UserRecord | None:
+        index_item = self.store.get(keys.user_email_index_key(email_hash).as_tuple())
+        if index_item is None:
+            return None
+        return await self.get_user(index_item[A.TENANT_ID], index_item[A.USER_ID])
+
+    async def put_user(self, user: UserRecord) -> None:
+        """Update an existing user (password, role, status, rehash).
+
+        Email is immutable once a user is created -- changing it here would
+        orphan the uniqueness index -- so this never touches the email index.
+        """
+        key = keys.user_key(user.tenant_id, user.user_id).as_tuple()
+        self.store.put(key, {A.ENTITY_TYPE: A.E_USER, "user": user})
+
+    async def list_users(self, tenant_id: str) -> tuple[UserRecord, ...]:
+        users = [
+            item["user"]
+            for item in self.store.scan(keys.TABLE_CORE)
+            if item.get(A.ENTITY_TYPE) == A.E_USER and item["user"].tenant_id == tenant_id
+        ]
+        return tuple(users)
+
+    # -- durable login throttle (tier 2; auth/ratelimit.py owns tier 1) ----
+
+    async def record_login_failure(
+        self,
+        email_hash: str,
+        *,
+        at_epoch: int,
+        window_seconds: int,
+        lockout_threshold: int,
+        lockout_base_seconds: int,
+        lockout_cap_seconds: int,
+    ) -> tuple[int, int]:
+        key = keys.login_counter_key(email_hash).as_tuple()
+        with self.store._lock:
+            item = self.store._items.get(key)
+            if (
+                item is None
+                or at_epoch - int(item.get(A.WINDOW_STARTED_EPOCH, 0)) >= window_seconds
+            ):
+                item = {
+                    A.ENTITY_TYPE: A.E_LOGIN_COUNTER,
+                    A.FAILED_ATTEMPTS: 0,
+                    A.WINDOW_STARTED_EPOCH: at_epoch,
+                    A.LOCKED_UNTIL_EPOCH: 0,
+                }
+            item[A.FAILED_ATTEMPTS] = int(item[A.FAILED_ATTEMPTS]) + 1
+            count = item[A.FAILED_ATTEMPTS]
+            locked_until = int(item.get(A.LOCKED_UNTIL_EPOCH, 0))
+            if count >= lockout_threshold:
+                backoff = min(
+                    lockout_base_seconds * (2 ** (count - lockout_threshold)),
+                    lockout_cap_seconds,
+                )
+                locked_until = at_epoch + backoff
+                item[A.LOCKED_UNTIL_EPOCH] = locked_until
+            self.store._items[key] = item
+            return count, locked_until
+
+    async def clear_login_failures(self, email_hash: str) -> None:
+        self.store.delete(keys.login_counter_key(email_hash).as_tuple())
+
+    async def get_login_lockout(self, email_hash: str) -> tuple[int, int]:
+        item = self.store.get(keys.login_counter_key(email_hash).as_tuple())
+        if item is None:
+            return 0, 0
+        return int(item.get(A.FAILED_ATTEMPTS, 0)), int(item.get(A.LOCKED_UNTIL_EPOCH, 0))
+
+    # -- human auth: sessions --------------------------------------------
+
+    async def put_auth_session(self, session: AuthSession) -> None:
+        self.store.put(
+            keys.auth_session_key(session.token_hash).as_tuple(),
+            {A.ENTITY_TYPE: A.E_USER_SESSION, "session": session},
+        )
+
+    async def get_auth_session(self, token_hash: str) -> AuthSession | None:
+        item = self.store.get(keys.auth_session_key(token_hash).as_tuple())
+        if item is None:
+            return None
+        session: AuthSession = item["session"]
+        return session
+
+    async def touch_auth_session(self, token_hash: str, *, last_seen_epoch: int) -> None:
+        key = keys.auth_session_key(token_hash).as_tuple()
+        with self.store._lock:
+            item = self.store._items.get(key)
+            if item is None:
+                return
+            session: AuthSession = item["session"]
+            item["session"] = replace(
+                session, last_seen_at=datetime.fromtimestamp(last_seen_epoch, tz=UTC)
+            )
+
+    async def revoke_auth_session(self, token_hash: str) -> bool:
+        key = keys.auth_session_key(token_hash).as_tuple()
+        with self.store._lock:
+            item = self.store._items.get(key)
+            if item is None:
+                return False
+            session: AuthSession = item["session"]
+            if session.revoked:
+                return False
+            item["session"] = replace(session, revoked=True)
+            return True
+
+    async def revoke_user_sessions(
+        self, tenant_id: str, user_id: str, *, except_token_hash: str | None = None
+    ) -> int:
+        count = 0
+        with self.store._lock:
+            for item in self.store._items.values():
+                if item.get(A.ENTITY_TYPE) != A.E_USER_SESSION:
+                    continue
+                session: AuthSession = item["session"]
+                if session.tenant_id != tenant_id or session.user_id != user_id:
+                    continue
+                if session.token_hash == except_token_hash or session.revoked:
+                    continue
+                item["session"] = replace(session, revoked=True)
+                count += 1
+        return count
+
+    # -- agent API keys ----------------------------------------------------
+
+    async def put_api_key(self, record: ApiKeyRecord) -> None:
+        self.store.put(
+            keys.api_key_record_key(record.key_hash).as_tuple(),
+            {A.ENTITY_TYPE: A.E_API_KEY, "record": record},
+        )
+        with self.store._lock:
+            self._mark_credentials_configured_locked()
+
+    async def get_api_key_by_hash(self, key_hash: str) -> ApiKeyRecord | None:
+        item = self.store.get(keys.api_key_record_key(key_hash).as_tuple())
+        if item is None:
+            return None
+        record: ApiKeyRecord = item["record"]
+        return record
+
+    async def list_api_keys(self, tenant_id: str) -> tuple[ApiKeyRecord, ...]:
+        records = [
+            item["record"]
+            for item in self.store.scan(keys.TABLE_CORE)
+            if item.get(A.ENTITY_TYPE) == A.E_API_KEY and item["record"].tenant_id == tenant_id
+        ]
+        return tuple(records)
+
+    async def has_any_credential(self) -> bool:
+        return self.store.get(keys.credentials_marker_key().as_tuple()) is not None
+
+    def _mark_credentials_configured_locked(self) -> None:
+        """Write the readiness marker. Caller must hold ``store._lock``."""
+        key = keys.credentials_marker_key().as_tuple()
+        self.store._items.setdefault(key, {A.ENTITY_TYPE: "CREDENTIALS_MARKER"})
 
     # -- test helpers -------------------------------------------------------
 

@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../components/AppShell";
-import { TopHeader } from "../components/TopHeader";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,6 +7,12 @@ export const metadata: Metadata = {
     "Enterprise infrastructure spending firewall for autonomous AI agents — financial authorization before inference dispatch.",
 };
 
+/**
+ * Deliberately bare: the operator shell (sidebar, top header) lives in
+ * `app/(app)/layout.tsx`, not here, because `/login` renders through this
+ * same root layout and must not be wrapped in a shell whose nav links point
+ * at pages a logged-out visitor cannot see.
+ */
 export default function RootLayout({
   children,
 }: {
@@ -16,18 +20,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
-        <div className="app-shell">
-          <AppShell>
-            <div className="main-viewport">
-              <TopHeader />
-              <div className="page-content-wrapper">
-                {children}
-              </div>
-            </div>
-          </AppShell>
-        </div>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
